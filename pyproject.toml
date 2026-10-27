@@ -4,17 +4,18 @@ build-backend = "hatchling.build"
 
 [project]
 name = "freedive-color-studio"
-version = "0.1.0"
-description = "Offline, conservative underwater photo grading for Windows and macOS"
+version = "0.3.0"
+description = "Offline underwater photo and video grading for Windows and macOS"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
 license = "MIT"
 dependencies = [
   "numpy>=2.2,<3",
-  "opencv-python-headless>=4.11,<5",
+  "opencv-python-headless==4.14.0.94",
   "Pillow>=11.1,<14",
   "PySide6-Essentials==6.8.3",
   "tifffile>=2025.1.10",
+  "av==15.1.0",
 ]
 
 [project.optional-dependencies]

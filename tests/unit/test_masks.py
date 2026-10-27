@@ -163,6 +163,27 @@ def test_above_water_exposure_is_independent():
     np.testing.assert_array_equal(result.rgb[90, 10], original[90, 10])
 
 
+def test_waterline_protects_above_water_skin_even_with_manual_brush_and_reference():
+    from freedive_color.core.reference import PaletteReference
+
+    original = np.full((120, 160, 3), [0.68, 0.5, 0.4], np.float32)
+    edits = MaskEdits(
+        strokes=(
+            BrushStroke("skin", "add", ((0.5, 0.25),), 0.12),
+            BrushStroke("skin", "add", ((0.5, 0.75),), 0.12),
+        ),
+        waterline=((0, 0.5), (1, 0.5)),
+    )
+    masks = build_masks(original, edits, use_model=False)
+    settings = LocalSettings(skin_strength=1, skin_warmth=1, reference_strength=1)
+    result = apply_local_grade(
+        original, original, settings, edits, masks, PaletteReference(skin_ab=(30, 40))
+    )
+    np.testing.assert_array_equal(result.rgb[:40], original[:40])
+    assert result.masks.skin[:40].max() == 0
+    assert result.rgb[90, 80, 0] > original[90, 80, 0]
+
+
 def test_zero_local_controls_and_disabled_are_identity(scene):
     rgb, probability = scene
     masks = build_masks(rgb, person_probability=probability)

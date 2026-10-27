@@ -1,0 +1,19 @@
+{
+  "dimensions_unchanged": true,
+  "frame_count_unchanged": true,
+  "maximum_video_pts_error_seconds": 0.0,
+  "video_track_duration_error_seconds": 0.0,
+  "video_track_start_error_seconds": 0.0,
+  "video_clock_tolerance_seconds": 9.166766666666667e-05,
+  "audio": [
+    {
+      "packet_count": 564,
+      "all_payload_hashes_equal": true,
+      "maximum_pts_error_seconds": 0.0,
+      "maximum_dts_error_seconds": 0.0,
+      "audio_track_duration_error_seconds": 0.0,
+      "audio_track_start_error_seconds": 0.0
+    }
+  ],
+  "extra_static_luminance_step": -8.569457682766624e-06
+}

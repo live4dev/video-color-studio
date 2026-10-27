@@ -19,10 +19,10 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def read_json(path: str | Path) -> dict:
+def read_json(path: str | Path, *, max_bytes: int = 2_000_000) -> dict:
     try:
-        if Path(path).stat().st_size > 2_000_000:
-            raise StudioError("Файл настроек слишком большой (больше 2 МБ).")
+        if Path(path).stat().st_size > max_bytes:
+            raise StudioError("Файл настроек слишком большой для этого режима.")
         data = json.loads(Path(path).read_text(encoding="utf-8"))
         if not isinstance(data, dict) or data.get("schema_version") != SCHEMA_VERSION:
             raise StudioError("Версия файла настроек не поддерживается.")

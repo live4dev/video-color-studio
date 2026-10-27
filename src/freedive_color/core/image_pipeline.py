@@ -45,6 +45,8 @@ class Preview:
     local_warnings: tuple[str, ...] = ()
     source_sha256: str = ""
     reference: object | None = None
+    video_info: object | None = None
+    timestamp: float = 0
 
 
 def render_rgb(

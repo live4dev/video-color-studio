@@ -26,6 +26,7 @@ class LocalControls(QWidget):
     undo_requested = Signal()
     reset_requested = Signal()
     reference_requested = Signal()
+    frame_reference_requested = Signal()
     clear_reference_requested = Signal()
 
     def __init__(self, parent=None):
@@ -149,6 +150,12 @@ class LocalControls(QWidget):
         reference.addWidget(choose)
         reference.addWidget(remove)
         layout.addLayout(reference)
+        frame_reference = QPushButton(_("Текущий результат — эталон"))
+        frame_reference.setToolTip(
+            _("Сохранить палитру показанного кадра, включая цветокоррекцию.")
+        )
+        frame_reference.clicked.connect(self.frame_reference_requested)
+        layout.addWidget(frame_reference)
         self.reference_label = QLabel(_("Эталон не выбран"))
         self.reference_label.setObjectName("metadata")
         self.reference_label.setWordWrap(True)

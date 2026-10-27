@@ -1,13 +1,17 @@
+import shutil
+import sys
+import tempfile
 from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import QSignalBlocker, QSize, Qt, QThreadPool, QTimer, Signal
-from PySide6.QtGui import QAction, QCloseEvent, QIcon, QKeySequence, QPixmap
+from PySide6.QtCore import QSignalBlocker, QSize, Qt, QThreadPool, QTimer, QUrl, Signal
+from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices, QIcon, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
     QCheckBox,
     QComboBox,
+    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
@@ -15,9 +19,11 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QMessageBox,
     QProgressBar,
     QPushButton,
     QScrollArea,
+    QSlider,
     QSpinBox,
     QSplitter,
     QStyle,
@@ -26,6 +32,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from freedive_color import __version__
 from freedive_color.core.analyze import SceneAnalysis, analyze_scene
 from freedive_color.core.batch import export_batch
 from freedive_color.core.errors import StudioError
@@ -38,10 +45,10 @@ from freedive_color.core.image_pipeline import (
 )
 from freedive_color.core.local_pipeline import LocalSettings
 from freedive_color.core.masks import BrushStroke, MaskEdits
-from freedive_color.core.media_io import PHOTO_EXTENSIONS, load_photo
+from freedive_color.core.media_io import PHOTO_EXTENSIONS, Photo, load_photo, signature
 from freedive_color.core.presets import GradeSettings, get_preset
 from freedive_color.core.project import load_settings, read_json, save_settings, sha256_file
-from freedive_color.core.reference import PaletteReference
+from freedive_color.core.reference import PaletteReference, create_reference
 from freedive_color.core.session import (
     ExportOptions,
     Session,
@@ -53,6 +60,7 @@ from freedive_color.core.session import (
 from .controls import GradeControls
 from .local_controls import LocalControls
 from .strings import _
+from .video_playback import VideoPlayback
 from .viewer import CompareViewer, to_qimage
 from .workers import Worker
 
@@ -63,12 +71,16 @@ MASK_ROLE = Qt.ItemDataRole.UserRole + 3
 ANALYSIS_ROLE = Qt.ItemDataRole.UserRole + 4
 INFO_ROLE = Qt.ItemDataRole.UserRole + 5
 OPEN_FILTER = "Фото SDR (*.jpg *.jpeg *.png *.tif *.tiff)"
+VIDEO_EXTENSIONS = {".mp4", ".mov"}
+MEDIA_FILTER = "Фото и видео SDR (*.jpg *.jpeg *.png *.tif *.tiff *.mp4 *.mov)"
 
 
 class MainWindow(QMainWindow):
     preview_ready = Signal()
     export_completed = Signal(object)
     batch_completed = Signal(object)
+    video_preview_completed = Signal(object)
+    video_export_completed = Signal(object)
     operation_failed = Signal(str)
 
     def __init__(self):
@@ -89,6 +101,17 @@ class MainWindow(QMainWindow):
         self.temp_directory = None
         self.output_directory = None
         self.last_batch = None
+        self.video_info = None
+        self.video_frame_seconds = 0.0
+        self._video_seek_position = 0.0
+        self.video_preview_path = None
+        self.video_preview_start = 0.0
+        self.video_preview_duration = 0.0
+        self._video_playing = False
+        self.video_playback = None
+        self._video_plan = None
+        self._proxy_directories = []
+        self._photo_export_suffix = ".jpg"
         self._jobs: dict[int, tuple[Worker, str, object]] = {}
         self._counter = 0
         self._view_job: int | None = None
@@ -117,13 +140,13 @@ class MainWindow(QMainWindow):
         brand = QLabel("Freedive Color Studio")
         brand.setObjectName("brand")
         header_layout.addWidget(brand)
-        stage = QLabel(_("Фото · v0.2"))
+        stage = QLabel(_("Фото и видео · v") + __version__)
         stage.setObjectName("subtle")
         header_layout.addWidget(stage)
         header_layout.addStretch()
         self.import_button = QPushButton(_("Импорт"))
         self.import_button.setObjectName("import_button")
-        self.import_button.setToolTip(_("Открыть фотографии · ⌘O / Ctrl+O"))
+        self.import_button.setToolTip(_("Открыть фото и видео · ⌘O / Ctrl+O"))
         self.import_button.clicked.connect(self.open_dialog)
         header_layout.addWidget(self.import_button)
         self.batch_button = QPushButton(_("Экспорт серии"))
@@ -147,7 +170,7 @@ class MainWindow(QMainWindow):
         title = QLabel(_("Библиотека"))
         title.setObjectName("sectionTitle")
         library_layout.addWidget(title)
-        self.library_count = QLabel(_("Нет фотографий"))
+        self.library_count = QLabel(_("Нет файлов"))
         self.library_count.setObjectName("subtle")
         library_layout.addWidget(self.library_count)
         self.library = QListWidget()
@@ -210,12 +233,63 @@ class MainWindow(QMainWindow):
         self.fit_button.clicked.connect(self.viewer.fit)
         self.one_button.clicked.connect(self._one_to_one)
         center_layout.addWidget(self.viewer, 1)
+        self.video_panel = QWidget()
+        video_layout = QVBoxLayout(self.video_panel)
+        video_layout.setContentsMargins(14, 8, 14, 8)
+        self.video_timeline = QSlider(Qt.Orientation.Horizontal)
+        self.video_timeline.setObjectName("video_timeline")
+        self.video_timeline.setRange(0, 0)
+        self.video_timeline.valueChanged.connect(lambda value: self.seek_video(value / 1000))
+        video_layout.addWidget(self.video_timeline)
+        video_row = QHBoxLayout()
+        self.video_play_button = QPushButton(_("Воспроизвести"))
+        self.video_play_button.clicked.connect(self.toggle_video_playback)
+        video_row.addWidget(self.video_play_button)
+        self.video_time_label = QLabel("0.00 / 0.00 с")
+        video_row.addWidget(self.video_time_label)
+        self.video_start_spin = QDoubleSpinBox()
+        self.video_start_spin.setRange(0, 1)
+        self.video_start_spin.setDecimals(2)
+        self.video_start_spin.setSuffix(" с")
+        video_row.addWidget(QLabel(_("От")))
+        video_row.addWidget(self.video_start_spin)
+        self.video_duration_spin = QDoubleSpinBox()
+        self.video_duration_spin.setRange(0.1, 15)
+        self.video_duration_spin.setValue(10)
+        self.video_duration_spin.setSuffix(" с")
+        video_row.addWidget(QLabel(_("Длина")))
+        video_row.addWidget(self.video_duration_spin)
+        self.video_preview_button = QPushButton(_("Создать превью"))
+        self.video_preview_button.clicked.connect(
+            lambda: self.create_video_preview(
+                self.video_start_spin.value(), self.video_duration_spin.value()
+            )
+        )
+        video_row.addWidget(self.video_preview_button)
+        video_layout.addLayout(video_row)
+        sound_row = QHBoxLayout()
+        self.video_sound_note = QLabel(_("В окне — сравнение без звука."))
+        self.video_sound_note.setObjectName("metadata")
+        self.video_sound_note.setWordWrap(True)
+        sound_row.addWidget(self.video_sound_note, 1)
+        self.video_sound_button = QPushButton(_("Открыть со звуком"))
+        self.video_sound_button.clicked.connect(self.open_video_preview_external)
+        sound_row.addWidget(self.video_sound_button)
+        video_layout.addLayout(sound_row)
+        mask_note = QLabel(
+            _("Автомаски следуют за движением. Ручные мазки и линия воды закреплены в кадре.")
+        )
+        mask_note.setObjectName("metadata")
+        mask_note.setWordWrap(True)
+        video_layout.addWidget(mask_note)
+        center_layout.addWidget(self.video_panel)
+        self.video_panel.hide()
         info_layout = QVBoxLayout()
         info_layout.setContentsMargins(18, 11, 18, 12)
         info_layout.setSpacing(5)
         self.image_title = QLabel(_("Оригинал остаётся без изменений"))
         info_layout.addWidget(self.image_title)
-        self.metadata_label = QLabel(_("Откройте фотографию, выберите стиль и настройте цвет."))
+        self.metadata_label = QLabel(_("Откройте фото или видео, выберите стиль и настройте цвет."))
         self.metadata_label.setObjectName("metadata")
         self.metadata_label.setWordWrap(True)
         info_layout.addWidget(self.metadata_label)
@@ -249,6 +323,7 @@ class MainWindow(QMainWindow):
         self.local_controls.undo_requested.connect(self.undo_mask_edit)
         self.local_controls.reset_requested.connect(self.reset_mask_edits)
         self.local_controls.reference_requested.connect(self.reference_dialog)
+        self.local_controls.frame_reference_requested.connect(self.use_frame_reference)
         self.local_controls.clear_reference_requested.connect(self.clear_reference)
         tabs.addTab(self.local_controls, _("Области и маски"))
         right_layout.addWidget(tabs)
@@ -336,7 +411,7 @@ class MainWindow(QMainWindow):
 
     def _build_menu(self) -> None:
         file_menu = self.menuBar().addMenu(_("Файл"))
-        open_action = QAction(_("Импорт фотографий…"), self)
+        open_action = QAction(_("Импорт фото и видео…"), self)
         open_action.setShortcut(QKeySequence.StandardKey.Open)
         open_action.triggered.connect(self.open_dialog)
         file_menu.addAction(open_action)
@@ -356,7 +431,7 @@ class MainWindow(QMainWindow):
         temp_folder = QAction(_("Папка временных файлов…"), self)
         temp_folder.triggered.connect(self.choose_temp_directory)
         file_menu.addAction(temp_folder)
-        self.export_action = QAction(_("Экспорт фотографии…"), self)
+        self.export_action = QAction(_("Экспорт выбранного файла…"), self)
         self.export_action.setShortcut(QKeySequence("Ctrl+Shift+S"))
         self.export_action.triggered.connect(self.export_dialog)
         file_menu.addAction(self.export_action)
@@ -377,25 +452,67 @@ class MainWindow(QMainWindow):
             action.setShortcut(QKeySequence(key))
             action.triggered.connect(callback)
             view_menu.addAction(action)
+        help_menu = self.menuBar().addMenu(_("Справка"))
+        about = help_menu.addAction(_("О программе и лицензиях…"))
+        about.triggered.connect(self.show_about)
+
+    def show_about(self) -> None:
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle(_("О программе"))
+        dialog.setText(f"Freedive Color Studio {__version__}")
+        dialog.setInformativeText(
+            _(
+                "© 2026 Freedive Color Studio contributors.\n\n"
+                "Код приложения — MIT. Автономная сборка включает FFmpeg, x264/x265 "
+                "и Qt с условиями GPL/LGPL. Сборка в целом распространяется на условиях GPLv3.\n\n"
+                "Программа предоставляется без гарантий. Её можно изучать, изменять и "
+                "распространять с соблюдением приложенных лицензий. Исходники и рецепты "
+                "сборки доступны в архиве источников рядом с дистрибутивом.\n\n"
+                "Обработка медиа выполняется локально."
+            )
+        )
+        licenses = dialog.addButton(_("Открыть лицензии"), QMessageBox.ButtonRole.ActionRole)
+        dialog.addButton(QMessageBox.StandardButton.Close)
+        dialog.exec()
+        if dialog.clickedButton() is licenses:
+            root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[3]))
+            path = root / "licenses"
+            if not path.exists():
+                path = root / "THIRD_PARTY_LICENSES.md"
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
     def _update_actions(self) -> None:
         exporting = self._export_job is not None
-        ready = self.preview is not None and not self._render_pending and not exporting
+        playing = self._video_playing
+        ready = (
+            self.preview is not None and not self._render_pending and not exporting and not playing
+        )
         self.export_button.setEnabled(ready)
+        self.export_button.setText(_("Экспорт видео") if self.video_info else _("Экспорт фото"))
         self.export_action.setEnabled(ready)
         self.import_button.setEnabled(not exporting)
         self.folder_button.setEnabled(not exporting)
         self.library.setEnabled(not exporting)
-        self.right_panel.setEnabled(not exporting)
+        self.right_panel.setEnabled(not exporting and not playing)
         self.controls.setEnabled(self.preview is not None and not exporting)
         self.local_controls.setEnabled(self.preview is not None and not exporting)
-        self.viewer.edits_enabled = self.preview is not None and not exporting
+        self.viewer.edits_enabled = self.preview is not None and not exporting and not playing
         self.batch_button.setEnabled(
             self.library.count() > 0 and not exporting and not self._render_pending
         )
         self.apply_group_button.setEnabled(self.preview is not None and not exporting)
         self.fit_button.setEnabled(self.preview is not None)
         self.one_button.setEnabled(self.preview is not None and not self._full_loading)
+        self.video_play_button.setEnabled(
+            self.video_info is not None and not exporting and not self._render_pending
+        )
+        self.video_preview_button.setEnabled(self.video_info is not None and ready)
+        self.video_sound_button.setEnabled(self.video_preview_path is not None and not exporting)
+        self.video_timeline.setEnabled(
+            self.video_info is not None and not exporting and not playing
+        )
+        self.video_start_spin.setEnabled(not exporting and not playing)
+        self.video_duration_spin.setEnabled(not exporting and not playing)
 
     def _status(self, message: str, error: bool = False) -> None:
         self.status_label.setText(message)
@@ -405,13 +522,13 @@ class MainWindow(QMainWindow):
         if self._export_job is not None:
             return
         paths, _selected = QFileDialog.getOpenFileNames(
-            self, _("Импорт фотографий"), "", OPEN_FILTER
+            self, _("Импорт фото и видео"), "", MEDIA_FILTER
         )
         if paths:
             self.import_paths([Path(path) for path in paths])
 
     def open_folder(self) -> None:
-        path = QFileDialog.getExistingDirectory(self, _("Папка с фотографиями"))
+        path = QFileDialog.getExistingDirectory(self, _("Папка с фото и видео"))
         if path:
             self.import_paths([Path(path)])
 
@@ -428,14 +545,15 @@ class MainWindow(QMainWindow):
                             (
                                 child
                                 for child in path.iterdir()
-                                if child.is_file() and child.suffix.lower() in PHOTO_EXTENSIONS
+                                if child.is_file()
+                                and child.suffix.lower() in PHOTO_EXTENSIONS | VIDEO_EXTENSIONS
                             ),
                             key=lambda child: child.name.casefold(),
                         )[:500]
                     )
                 except OSError:
                     unsupported.append(path.name)
-            elif path.suffix.lower() in PHOTO_EXTENSIONS:
+            elif path.suffix.lower() in PHOTO_EXTENSIONS | VIDEO_EXTENSIONS:
                 candidates.append(path)
             else:
                 unsupported.append(path.name)
@@ -457,21 +575,27 @@ class MainWindow(QMainWindow):
             self.library.addItem(item)
             existing.add(resolved)
             added.append(item)
-        self.library_count.setText(_("Фотографий: ") + str(self.library.count()))
+        self.library_count.setText(_("Файлов: ") + str(self.library.count()))
         if added:
             self.library.setCurrentItem(added[0])
         elif candidates and self.library.currentItem():
             self._load_selected()
         else:
-            self._status(_("В этой папке нет JPEG, PNG или TIFF."), error=True)
+            self._status(_("В этой папке нет поддерживаемых фото или видео."), error=True)
         if unsupported:
             self._status(
-                _("Поддерживаются JPEG, PNG и TIFF. Не открыто: ") + ", ".join(unsupported[:3]),
+                _("Поддерживаются JPEG, PNG, TIFF, MP4 и MOV. Не открыто: ")
+                + ", ".join(unsupported[:3]),
                 error=True,
             )
 
     def _selection_changed(self, current, _previous) -> None:
         if current:
+            self.stop_video_playback()
+            self.video_info = None
+            self.video_preview_path = None
+            self._video_plan = None
+            self._video_seek_position = 0.0
             self.controls.set_settings(
                 GradeSettings.from_dict(current.data(SETTINGS_ROLE)), emit=False
             )
@@ -499,6 +623,9 @@ class MainWindow(QMainWindow):
         edits = self.mask_edits
         reference = self.reference
         reference_path = self.reference_path
+        is_video = source.suffix.lower() in VIDEO_EXTENSIONS
+        seek_position = self._video_seek_position
+        video_plan = self._video_plan
         cached_analysis = item.data(ANALYSIS_ROLE)
         cached_info = item.data(INFO_ROLE) or {}
         saved_analysis = self.preview.analysis if full_resolution and self.preview else None
@@ -512,37 +639,75 @@ class MainWindow(QMainWindow):
             self.viewer.clear()
             self.warning_label.clear()
             self.image_title.setText(source.name)
-            self.metadata_label.setText(_("Чтение фотографии…"))
+            self.metadata_label.setText(_("Чтение медиафайла…"))
         self._status(
-            _("Загрузка полного разрешения…") if full_resolution else _("Анализ фотографии…")
+            _("Загрузка полного разрешения…") if full_resolution else _("Анализ медиафайла…")
         )
 
         def operation(token, progress):
-            progress(10, _("Чтение фотографии…"))
-            photo = load_photo(source, max_edge=None if full_resolution else 1440)
+            progress(10, _("Чтение медиафайла…"))
+            info, actual = None, 0.0
+            if is_video:
+                from freedive_color.core.video_pipeline import probe_video, read_video_frame
+
+                info = probe_video(source)
+                rgb, actual = read_video_frame(
+                    source,
+                    seek_position,
+                    max_edge=max(info.width, info.height) if full_resolution else 1440,
+                )
+                photo = Photo(
+                    source,
+                    rgb,
+                    None,
+                    info.width,
+                    info.height,
+                    info.bit_depth,
+                    source.suffix[1:].upper(),
+                    "SDR Rec.709 → sRGB",
+                    list(getattr(info, "warnings", ())),
+                    stat_signature=signature(source),
+                )
+            else:
+                photo = load_photo(source, max_edge=None if full_resolution else 1440)
             if expected_signature and photo.stat_signature != expected_signature:
                 raise StudioError(_("Оригинал изменился. Импортируйте его ещё раз."))
             token.check()
-            digest = sha256_file(source)
+            digest = (
+                cached_info.get("sha256")
+                if cached_info.get("signature") == list(photo.stat_signature)
+                else None
+            ) or sha256_file(source)
+            if cached_info.get("sha256") and cached_info["sha256"] != digest:
+                raise StudioError(
+                    _(
+                        "Исходник изменился. Выберите «Файл → Повторно импортировать», "
+                        "чтобы сбросить старые маски и анализ."
+                    )
+                )
             resolved_reference = reference
             if resolved_reference is None and reference_path is not None:
                 try:
                     resolved_reference = create_image_reference(reference_path)
                 except StudioError as exc:
                     photo.warnings.append(_("Эталон недоступен: ") + str(exc))
-            if saved_analysis:
+            resolved_plan = video_plan
+            if (
+                is_video
+                and resolved_plan is None
+                and isinstance(cached_info.get("shot_plan"), dict)
+            ):
+                from freedive_color.core.temporal import ShotPlan
+
+                resolved_plan = ShotPlan.from_dict(cached_info["shot_plan"])
+            if is_video and resolved_plan is not None:
+                analysis = resolved_plan.analysis_at(float(info.video_start) + actual)
+            elif saved_analysis:
                 analysis = saved_analysis
             elif cached_analysis and cached_info.get("sha256") == digest:
                 analysis = SceneAnalysis.from_dict(cached_analysis)
             else:
                 analysis = analyze_scene(photo.rgb)
-                if cached_info.get("sha256") and cached_info["sha256"] != digest:
-                    raise StudioError(
-                        _(
-                            "Исходник изменился. Выберите «Файл → Повторно импортировать», "
-                            "чтобы сбросить старые маски и анализ."
-                        )
-                    )
             progress(50, _("Создание предпросмотра…"))
             result, masks, warnings = render_rgb(
                 photo.rgb,
@@ -553,10 +718,15 @@ class MainWindow(QMainWindow):
                 reference=resolved_reference,
                 check_cancelled=token.check,
             )
-            return Preview(photo, analysis, result, masks, warnings, digest, resolved_reference)
+            return Preview(
+                photo, analysis, result, masks, warnings, digest, resolved_reference, info, actual
+            )
 
         def success(preview):
             self.preview = preview
+            self.video_info = preview.video_info
+            self.video_frame_seconds = preview.timestamp
+            self._configure_video_ui()
             if self.reference is None and preview.reference is not None:
                 self.reference = preview.reference
                 self.local_controls.reference_label.setText(
@@ -585,7 +755,16 @@ class MainWindow(QMainWindow):
             item.setIcon(QIcon(thumb))
             item.setText(source.name + "\n" + _("Готово"))
             item.setData(ANALYSIS_ROLE, preview.analysis.to_dict())
-            item.setData(INFO_ROLE, {**photo.metadata(), "sha256": preview.source_sha256})
+            item.setData(
+                INFO_ROLE,
+                {
+                    **cached_info,
+                    **photo.metadata(),
+                    "sha256": preview.source_sha256,
+                    "signature": list(photo.stat_signature),
+                    **({"video": self.video_info.to_dict()} if self.video_info else {}),
+                },
+            )
             self.image_title.setText(source.name)
             proxy_note = (
                 _("полное разрешение")
@@ -614,6 +793,9 @@ class MainWindow(QMainWindow):
         self._update_actions()
 
     def _settings_changed(self, settings: GradeSettings) -> None:
+        if self.video_info is not None:
+            self.stop_video_playback()
+            self.video_preview_path = None
         item = self.library.currentItem()
         if item:
             item.setData(SETTINGS_ROLE, settings.to_dict())
@@ -649,7 +831,17 @@ class MainWindow(QMainWindow):
 
         def success(processed):
             result, masks, warnings = processed
-            self.preview = Preview(photo, analysis, result, masks, warnings, previous.source_sha256)
+            self.preview = Preview(
+                photo,
+                analysis,
+                result,
+                masks,
+                warnings,
+                previous.source_sha256,
+                previous.reference,
+                previous.video_info,
+                previous.timestamp,
+            )
             self.rendered_settings = settings
             self.rendered_local_settings = local
             self.rendered_mask_edits = edits
@@ -789,10 +981,43 @@ class MainWindow(QMainWindow):
         self.local_controls.reference_label.setText(_("Эталон не выбран"))
         self._local_settings_changed(self.local_controls.settings())
 
+    def use_frame_reference(self) -> None:
+        if self.preview is None or self._render_pending or self._export_job is not None:
+            return
+        self.stop_video_playback()
+        preview = self.preview
+        name = preview.photo.path.name
+        if preview.video_info is not None:
+            name += f" · {preview.timestamp:.2f} с"
+        self._cancel_view_job()
+        self._debounce.stop()
+        self._render_pending = True
+
+        def operation(token, _progress):
+            token.check()
+            return create_reference(
+                preview.result,
+                masks=preview.masks,
+                source_name=name,
+                source_sha256=preview.source_sha256,
+            )
+
+        def success(reference):
+            self.reference, self.reference_path = reference, None
+            self.local_controls.reference_label.setText(_("Эталон кадра: ") + name)
+            self._local_settings_changed(self.local_controls.settings())
+
+        self._submit("view", operation, success)
+        self._update_actions()
+
     def _export_options(self) -> ExportOptions:
         return ExportOptions(
-            self.format_combo.currentData(),
-            self.depth_combo.currentData(),
+            self._photo_export_suffix
+            if self.format_combo.currentData() == ".mp4"
+            else self.format_combo.currentData(),
+            getattr(self, "_photo_export_depth", 8)
+            if self.format_combo.currentData() == ".mp4"
+            else self.depth_combo.currentData(),
             self.quality_spin.value(),
             self.gps_check.isChecked(),
         )
@@ -865,6 +1090,11 @@ class MainWindow(QMainWindow):
         if self._export_job is not None:
             return
         session = load_session(path)
+        self.stop_video_playback()
+        self.video_info = None
+        self.video_preview_path = None
+        self._video_plan = None
+        self._configure_video_ui()
         self._cancel_view_job()
         self._debounce.stop()
         self.preview = None
@@ -920,7 +1150,7 @@ class MainWindow(QMainWindow):
         self.quality_spin.setValue(session.export_options.quality)
         self.gps_check.setChecked(session.export_options.keep_gps and self.gps_check.isEnabled())
         self.session_path = Path(path).resolve()
-        self.library_count.setText(_("Фотографий: ") + str(self.library.count()))
+        self.library_count.setText(_("Файлов: ") + str(self.library.count()))
         if session.items:
             self.library.setCurrentRow(session.selected_index or 0)
         else:
@@ -943,6 +1173,7 @@ class MainWindow(QMainWindow):
         self._debounce.stop()
         self._render_pending = False
         self.output_directory = Path(directory).resolve()
+        temp_directory = self.temp_directory
 
         def operation(token, progress):
             return export_batch(
@@ -951,6 +1182,7 @@ class MainWindow(QMainWindow):
                 options,
                 token=token,
                 reference=reference,
+                temp_directory=temp_directory,
                 progress=lambda done, total, message: progress(
                     round(done / max(1, total) * 100), message
                 ),
@@ -1000,9 +1232,12 @@ class MainWindow(QMainWindow):
 
     def _format_changed(self) -> None:
         jpeg = self.format_combo.currentData() == ".jpg"
-        self.depth_combo.setEnabled(not jpeg)
+        video = self.format_combo.currentData() == ".mp4"
+        if not video and self.format_combo.currentData():
+            self._photo_export_suffix = self.format_combo.currentData()
+        self.depth_combo.setEnabled(not jpeg and not video)
         self.quality_spin.setEnabled(jpeg)
-        if jpeg:
+        if jpeg or video:
             self.depth_combo.setCurrentIndex(0)
         self._depth_changed()
 
@@ -1016,6 +1251,34 @@ class MainWindow(QMainWindow):
 
     def export_dialog(self) -> None:
         if self.preview is None or not self.export_button.isEnabled():
+            return
+        if self.video_info is not None:
+            from freedive_color.integrations.ffmpeg import preferred_video_suffix
+
+            source = self.preview.photo.path
+            suffix = preferred_video_suffix(track.codec for track in self.video_info.audio_streams)
+            formats = (
+                "MOV H.264 (*.mov);;MP4 H.264 (*.mp4)"
+                if suffix == ".mov"
+                else "MP4 H.264 (*.mp4);;MOV H.264 (*.mov)"
+            )
+            path, _selected = QFileDialog.getSaveFileName(
+                self,
+                _("Экспорт видео"),
+                str(source.with_name(source.stem + "_" + self.controls.settings().preset + suffix)),
+                formats,
+            )
+            if path:
+                destination = Path(path)
+                self.start_video_export(
+                    destination
+                    if destination.suffix
+                    else destination.with_suffix(
+                        ".mov"
+                        if "*.mov" in _selected
+                        else (".mp4" if "*.mp4" in _selected else suffix)
+                    )
+                )
             return
         suffix = self.format_combo.currentData()
         source = self.preview.photo.path
@@ -1036,6 +1299,9 @@ class MainWindow(QMainWindow):
 
     def start_export(self, destination: Path) -> None:
         if self.preview is None or self._export_job is not None:
+            return
+        if self.video_info is not None:
+            self.start_video_export(destination)
             return
         self._debounce.stop()
         self._cancel_view_job()
@@ -1203,6 +1469,261 @@ class MainWindow(QMainWindow):
             self.temp_directory = Path(path).resolve()
             self._status(_("Временные файлы: ") + str(self.temp_directory))
 
+    def _configure_video_ui(self) -> None:
+        info = self.video_info
+        if info is not None:
+            self.video_sound_note.setText(
+                _("В окне — сравнение без звука. Звуковые дорожки сохранены в файле превью.")
+                if info.audio_streams
+                else _("В исходном видео нет звуковых дорожек.")
+            )
+            self.video_sound_button.setText(
+                _("Открыть со звуком") if info.audio_streams else _("Открыть файл")
+            )
+        self.video_panel.setVisible(info is not None)
+        if info is None:
+            index = self.format_combo.findData(".mp4")
+            if index >= 0:
+                blocker = QSignalBlocker(self.format_combo)
+                self.format_combo.removeItem(index)
+                self.format_combo.setCurrentIndex(
+                    self.format_combo.findData(self._photo_export_suffix)
+                )
+                del blocker
+                self._format_changed()
+                self.depth_combo.setCurrentIndex(
+                    self.depth_combo.findData(getattr(self, "_photo_export_depth", 8))
+                )
+            self.format_combo.setEnabled(True)
+            return
+        if self.format_combo.currentData() != ".mp4":
+            self._photo_export_depth = self.depth_combo.currentData()
+        index = self.format_combo.findData(".mp4")
+        if index < 0:
+            self.format_combo.addItem("H.264 SDR · MP4 / MOV", ".mp4")
+            index = self.format_combo.count() - 1
+        self.format_combo.setCurrentIndex(index)
+        self.format_combo.setEnabled(False)
+        duration = max(0.1, float(info.duration))
+        blocker = QSignalBlocker(self.video_timeline)
+        self.video_timeline.setRange(0, round(duration * 1000))
+        self.video_timeline.setValue(round(self.video_frame_seconds * 1000))
+        del blocker
+        self.video_start_spin.setRange(0, max(0, duration - 0.1))
+        self.video_duration_spin.setMaximum(min(15, duration))
+        self.video_time_label.setText(f"{self.video_frame_seconds:.2f} / {duration:.2f} с")
+
+    def seek_video(self, seconds: float) -> None:
+        if self.video_info is None or self._export_job is not None:
+            return
+        self.stop_video_playback()
+        self._video_seek_position = max(
+            0, min(float(seconds), max(0, float(self.video_info.duration) - 0.001))
+        )
+        self.video_start_spin.setValue(self._video_seek_position)
+        self._load_selected()
+
+    def _remember_video_plan(self, report: dict) -> None:
+        if report.get("plan"):
+            from freedive_color.core.temporal import ShotPlan
+
+            self._video_plan = ShotPlan.from_dict(report["plan"])
+            item = self.library.currentItem()
+            if item is not None:
+                item.setData(
+                    INFO_ROLE, {**(item.data(INFO_ROLE) or {}), "shot_plan": report["plan"]}
+                )
+
+    def create_video_preview(
+        self, start_seconds: float, duration_seconds: float, destination: Path | None = None
+    ) -> None:
+        if self.video_info is None or self.preview is None or self._export_job is not None:
+            return
+        from freedive_color.core.video_pipeline import export_video
+
+        self.stop_video_playback()
+        self._cancel_view_job()
+        self._debounce.stop()
+        source = self.preview.photo.path
+        settings, local, edits, reference = (
+            self.controls.settings(),
+            self.local_controls.settings(),
+            self.mask_edits,
+            self.reference,
+        )
+        info = self.video_info
+        start_seconds = max(0.0, min(float(start_seconds), max(0.0, float(info.duration) - 0.001)))
+        duration_seconds = max(
+            0.1, min(15.0, float(duration_seconds), float(info.duration) - start_seconds)
+        )
+        temp_directory = self.temp_directory
+        plan = self._video_plan or (self.library.currentItem().data(INFO_ROLE) or {}).get(
+            "shot_plan"
+        )
+        if destination is None:
+            base = temp_directory or Path(tempfile.gettempdir())
+            base.mkdir(parents=True, exist_ok=True)
+            directory = Path(tempfile.mkdtemp(prefix="freedive-proxy-", dir=base))
+            self._proxy_directories.append(directory)
+            from freedive_color.integrations.ffmpeg import preferred_video_suffix
+
+            destination = directory / (
+                "preview" + preferred_video_suffix(track.codec for track in info.audio_streams)
+            )
+        destination = Path(destination)
+        self._render_pending = False
+
+        def operation(token, progress):
+            return export_video(
+                source,
+                destination,
+                settings,
+                local_settings=local,
+                mask_edits=edits,
+                reference=reference,
+                token=token,
+                progress=progress,
+                preview_start=start_seconds,
+                preview_seconds=duration_seconds,
+                temp_directory=temp_directory,
+                proxy_edge=1280,
+                plan=plan,
+            )
+
+        def success(report):
+            self.video_preview_path = destination
+            actual = report.get("preview", {}).get("actual_source_start", {})
+            self.video_preview_start = float(
+                actual.get("seconds", float(info.video_start) + start_seconds)
+            ) - float(info.video_start)
+            self.video_preview_duration = duration_seconds
+            self._remember_video_plan(report)
+            self._status(
+                _("Превью готово с ")
+                + f"{self.video_preview_start:.2f} с. "
+                + _("Можно сравнить движение или открыть файл со звуком.")
+            )
+            self.video_preview_completed.emit(report)
+
+        self._status(_("Анализ сцен и создание превью…"))
+        self._submit("export", operation, success)
+        self._update_actions()
+
+    def start_video_export(self, destination: Path) -> None:
+        if self.video_info is None or self.preview is None or self._export_job is not None:
+            return
+        from freedive_color.core.video_pipeline import export_video
+
+        self.stop_video_playback()
+        self._cancel_view_job()
+        self._debounce.stop()
+        self._render_pending = False
+        source = self.preview.photo.path
+        settings, local, edits, reference = (
+            self.controls.settings(),
+            self.local_controls.settings(),
+            self.mask_edits,
+            self.reference,
+        )
+        temp_directory = self.temp_directory
+        plan = self._video_plan or (self.library.currentItem().data(INFO_ROLE) or {}).get(
+            "shot_plan"
+        )
+        keep_gps = self.gps_check.isChecked()
+
+        def operation(token, progress):
+            return export_video(
+                source,
+                destination,
+                settings,
+                local_settings=local,
+                mask_edits=edits,
+                reference=reference,
+                token=token,
+                progress=progress,
+                temp_directory=temp_directory,
+                plan=plan,
+                keep_gps=keep_gps,
+            )
+
+        def success(report):
+            self.last_export = report
+            self._remember_video_plan(report)
+            self._status(_("Видео сохранено: ") + str(destination))
+            self.video_export_completed.emit(report)
+            self.export_completed.emit(report)
+
+        self._status(_("Потоковый экспорт видео…"))
+        self._submit("export", operation, success)
+        self._update_actions()
+
+    def toggle_video_playback(self) -> None:
+        if self._video_playing:
+            self.stop_video_playback()
+            self.seek_video(self.video_frame_seconds)
+            return
+        if self.video_info is None or self.preview is None or self._export_job is not None:
+            return
+        if self.video_preview_path is None:
+            self.create_video_preview(
+                self.video_start_spin.value(), self.video_duration_spin.value()
+            )
+            return
+        self._video_playing = True
+        player = VideoPlayback(
+            self.preview.photo.path, self.video_preview_path, self.video_preview_start, self
+        )
+        self.video_playback = player
+
+        def frame_ready(before, after, seconds):
+            try:
+                if self.video_playback is player and self._video_playing and not self._closing:
+                    self.video_frame_seconds = seconds
+                    self.viewer.set_mask_overlay(None)
+                    self.viewer.set_images(
+                        to_qimage(before), to_qimage(after), self.video_info.width
+                    )
+                    blocker = QSignalBlocker(self.video_timeline)
+                    self.video_timeline.setValue(round(seconds * 1000))
+                    del blocker
+                    self.video_time_label.setText(
+                        f"{seconds:.2f} / {float(self.video_info.duration):.2f} с"
+                    )
+            finally:
+                player.acknowledged.set()
+
+        def finished():
+            if self.video_playback is player:
+                self._video_playing = False
+                self.video_playback = None
+                self.video_play_button.setText(_("Воспроизвести"))
+                self._update_actions()
+                if not self._closing and self._export_job is None:
+                    self.seek_video(self.video_frame_seconds)
+
+        player.frame_ready.connect(frame_ready, Qt.ConnectionType.QueuedConnection)
+        player.failed.connect(
+            lambda error: self._status(error, error=True), Qt.ConnectionType.QueuedConnection
+        )
+        player.finished.connect(finished, Qt.ConnectionType.QueuedConnection)
+        self.video_play_button.setText(_("Пауза"))
+        self._update_actions()
+        player.start()
+
+    def stop_video_playback(self) -> None:
+        player = self.video_playback
+        self.video_playback = None
+        self._video_playing = False
+        if player is not None:
+            player.stop()
+            player.wait()
+        if hasattr(self, "video_play_button"):
+            self.video_play_button.setText(_("Воспроизвести"))
+
+    def open_video_preview_external(self) -> None:
+        if self.video_preview_path is not None:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.video_preview_path)))
+
     def dropEvent(self, event) -> None:
         self.import_paths(
             [Path(url.toLocalFile()) for url in event.mimeData().urls() if url.isLocalFile()]
@@ -1211,8 +1732,18 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self._closing = True
+        self.stop_video_playback()
         self._debounce.stop()
         for worker, _kind, _success in self._jobs.values():
             worker.token.cancel()
         self.pool.waitForDone()
+        sources = [
+            Path(self.library.item(index).data(PATH_ROLE)).resolve()
+            for index in range(self.library.count())
+        ]
+        if self.reference_path:
+            sources.append(Path(self.reference_path).resolve())
+        for directory in self._proxy_directories:
+            if not any(source.is_relative_to(directory.resolve()) for source in sources):
+                shutil.rmtree(directory, ignore_errors=True)
         event.accept()

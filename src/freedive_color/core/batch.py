@@ -82,7 +82,14 @@ def plan_batch(
     if len({item.path for item in items}) != len(items):
         raise StudioError("Один исходник добавлен в очередь дважды.")
     directory = _local_path(output_directory)
-    bases = [f"{_safe_stem(item.path)}_{item.settings.preset}{options.suffix}" for item in items]
+    suffixes = [
+        item.path.suffix.lower() if item.path.suffix.lower() in (".mp4", ".mov") else options.suffix
+        for item in items
+    ]
+    bases = [
+        f"{_safe_stem(item.path)}_{item.settings.preset}{suffix}"
+        for item, suffix in zip(items, suffixes, strict=True)
+    ]
     # Count excluded entries too: toggling an exclusion never renames another input.
     counts = Counter(name.casefold() for name in bases)
     try:
@@ -92,14 +99,14 @@ def plan_batch(
     except ValueError:
         common = None
     paths = []
-    for item, base in zip(items, bases, strict=True):
+    for item, base, suffix in zip(items, bases, suffixes, strict=True):
         if not item.included:
             paths.append(None)
             continue
         if counts[base.casefold()] > 1:
             identity = item.path.relative_to(common).as_posix() if common else str(item.path)
             digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:10]
-            base = f"{_safe_stem(item.path)}_{item.settings.preset}_{digest}{options.suffix}"
+            base = f"{_safe_stem(item.path)}_{item.settings.preset}_{digest}{suffix}"
         paths.append(directory / base)
     if len({str(path).casefold() for path in paths if path}) != sum(
         path is not None for path in paths
@@ -120,14 +127,15 @@ def export_batch(
     exporter: Callable[..., dict] | None = None,
     reference_path: str | Path | None = None,
     reference: Any = None,
+    temp_directory: str | Path | None = None,
 ) -> BatchResult:
-    """Export at most one photo at a time. Completed files survive later cancellation/errors."""
+    """Export one media file at a time. Completed outputs survive cancellation/errors."""
     items = tuple(items)
     if any(not isinstance(item, SessionItem) for item in items):
         raise StudioError("Некорректный список файлов серии.")
     options = options or ExportOptions()
     token = token or CancellationToken()
-    exporter = exporter or export_photo
+    supplied_exporter = exporter
     destinations = plan_batch(items, output_directory, options)
     original_paths = {item.path for item in items}
     total = sum(item.included for item in items)
@@ -180,7 +188,21 @@ def export_batch(
                 "keep_gps": options.keep_gps,
                 "token": token,
             }
-            if item.analysis is not None:
+            is_video = item.path.suffix.lower() in (".mp4", ".mov")
+            if is_video and supplied_exporter is None:
+                from .video_pipeline import export_video
+
+                exporter = export_video
+                kwargs = {
+                    "token": token,
+                    "temp_directory": temp_directory,
+                    "keep_gps": options.keep_gps,
+                }
+                if item.media_info.get("shot_plan") is not None:
+                    kwargs["plan"] = item.media_info["shot_plan"]
+            else:
+                exporter = supplied_exporter or export_photo
+            if item.analysis is not None and not is_video:
                 kwargs["analysis"] = SceneAnalysis.from_dict(item.analysis)
             if item.local_settings:
                 kwargs["local_settings"] = item.local_settings

@@ -67,7 +67,8 @@ def run(arguments: list[str]) -> int:
             if args.show_mask:
                 window.settings_tabs.setCurrentWidget(window.local_controls)
                 window.local_controls.overlay_combo.setCurrentIndex(
-                    window.local_controls.overlay_combo.findData(args.show_mask))
+                    window.local_controls.overlay_combo.findData(args.show_mask)
+                )
             focused = app.focusWidget()
             if focused:
                 focused.clearFocus()

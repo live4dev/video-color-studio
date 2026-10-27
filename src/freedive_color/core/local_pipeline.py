@@ -10,7 +10,7 @@ from .analyze import linear_to_srgb, srgb_to_linear, validate_rgb
 from .color_pipeline import LUMA, _gamut_limit
 from .errors import StudioError
 from .masks import MaskEdits, MaskSet, build_masks
-from .reference import PaletteReference, match_reference
+from .reference import PaletteReference, ReferenceTransform, freeze_reference, match_reference
 
 LOCAL_RANGES = {
     "skin_warmth": (-1, 1),
@@ -81,7 +81,7 @@ def apply_local_grade(
     settings: LocalSettings | None = None,
     edits: MaskEdits | None = None,
     masks: MaskSet | None = None,
-    reference: PaletteReference | None = None,
+    reference: PaletteReference | ReferenceTransform | None = None,
 ) -> LocalResult:
     validate_rgb(original_rgb)
     validate_rgb(globally_graded_rgb)
@@ -96,6 +96,20 @@ def apply_local_grade(
         for key in ("person", "skin", "water", "underwater")
     ):
         raise StudioError("Маски не соответствуют снимку.")
+    if edits.waterline:
+        # Skin controls belong to the underwater grade. This also scopes explicit skin
+        # brush additions and reference statistics; above-water skin changes only through
+        # the separately requested above_exposure, never an underwater warmth adjustment.
+        masks = MaskSet(
+            masks.person,
+            masks.skin * masks.underwater,
+            masks.water,
+            masks.underwater,
+            masks.skin_confidence,
+            masks.person_confidence,
+            masks.warnings,
+            masks.method,
+        )
     if not settings.enabled:
         return LocalResult(globally_graded_rgb.copy(), masks, masks.warnings)
     # Only the underwater side receives the underwater global grade. Above water gets its
@@ -146,6 +160,8 @@ def apply_local_grade(
         amount = (masks.water * settings.water_strength)[..., None]
         out = out * (1 - amount) + water * amount
     if reference is not None:
+        if isinstance(reference, PaletteReference):
+            reference = freeze_reference(out.astype(np.float32), masks, reference)
         out = match_reference(out.astype(np.float32), masks, reference, settings.reference_strength)
     warnings = masks.warnings + (reference.warnings if reference is not None else ())
     return LocalResult(np.clip(out, 0, 1).astype(np.float32), masks, tuple(dict.fromkeys(warnings)))
