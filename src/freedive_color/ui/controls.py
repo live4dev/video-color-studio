@@ -125,20 +125,28 @@ class GradeControls(QWidget):
         self.values: dict[str, QLabel] = {}
         self.preset_buttons: dict[str, QPushButton] = {}
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 15, 16, 12)
-        layout.setSpacing(11)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(8)
         title = QLabel(_("Стиль"))
         title.setObjectName("sectionTitle")
         layout.addWidget(title)
         styles = QHBoxLayout()
-        styles.setSpacing(5)
+        styles.setSpacing(6)
         self.preset_group = QButtonGroup(self)
         for name in ("natural", "cinematic", "vivid"):
             button = QPushButton(name.title())
             button.setCheckable(True)
             button.setObjectName("preset_" + name)
+            button.setProperty("variant", "preset")
             button.setMinimumWidth(0)
-            button.setStyleSheet("padding-left: 7px; padding-right: 7px;")
+            button.setAccessibleName(_("Стиль ") + name.title())
+            button.setToolTip(
+                {
+                    "natural": _("Естественный цвет, умеренный контраст"),
+                    "cinematic": _("Мягкие света и тональная глубина"),
+                    "vivid": _("Выразительный цвет с умеренной насыщенностью"),
+                }[name]
+            )
             button.clicked.connect(lambda _checked=False, chosen=name: self.set_preset(chosen))
             self.preset_group.addButton(button)
             self.preset_buttons[name] = button
@@ -147,13 +155,17 @@ class GradeControls(QWidget):
         self.preset_note = QLabel()
         self.preset_note.setObjectName("subtle")
         self.preset_note.setWordWrap(True)
+        self.preset_note.setMinimumHeight(30)
         layout.addWidget(self.preset_note)
         for group_name, specs in CONTROL_GROUPS:
             title = QLabel(_(group_name))
             title.setObjectName("sectionTitle")
-            layout.addSpacing(7)
+            title.setProperty("separated", True)
+            layout.addSpacing(4)
             layout.addWidget(title)
             for key, label, low, high, tooltip in specs:
+                control = QVBoxLayout()
+                control.setSpacing(2)
                 heading = QHBoxLayout()
                 heading.setSpacing(3)
                 text = QLabel(_(label))
@@ -163,7 +175,7 @@ class GradeControls(QWidget):
                 value.setObjectName("value")
                 value.setAlignment(Qt.AlignmentFlag.AlignRight)
                 heading.addWidget(value)
-                layout.addLayout(heading)
+                control.addLayout(heading)
                 slider = ResetSlider(round(getattr(get_preset("natural"), key) * 100))
                 slider.setObjectName("control_" + key)
                 slider.setRange(low, high)
@@ -171,9 +183,11 @@ class GradeControls(QWidget):
                 slider.setToolTip(_(tooltip) + _(" Двойной щелчок — сброс."))
                 slider.valueChanged.connect(lambda _value, k=key: self._changed(k))
                 self.sliders[key], self.values[key] = slider, value
-                layout.addWidget(slider)
+                control.addWidget(slider)
+                layout.addLayout(control)
         self.reset_button = QPushButton(_("Сбросить стиль"))
         self.reset_button.setObjectName("reset_settings")
+        self.reset_button.setProperty("variant", "ghost")
         self.reset_button.clicked.connect(
             lambda: self.set_preset(self.preset_name if self.preset_name != "custom" else "natural")
         )

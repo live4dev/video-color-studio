@@ -54,7 +54,7 @@ class CompareViewer(QWidget):
         self.edits_enabled = True
         self._stroke_points = []
         self._hover_position = QPointF(-100, -100)
-        self.setAccessibleName(_("Просмотр фотографии до и после обработки"))
+        self.setAccessibleName(_("Просмотр фото и видео до и после обработки"))
 
     def set_images(
         self, before: QImage, after: QImage, source_width: int, reset_transform: bool = False
@@ -156,36 +156,24 @@ class CompareViewer(QWidget):
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor("#181d21"))
+        painter.fillRect(self.rect(), QColor("#101012"))
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, self.scale < 1)
         if self.before.isNull():
-            painter.setPen(QColor("#dbe3e7"))
-            font = painter.font()
-            font.setPointSize(19)
-            painter.setFont(font)
-            area = self.rect().adjusted(24, 0, -24, -35)
-            painter.drawText(area, Qt.AlignmentFlag.AlignCenter, _("Начните с фотографии"))
-            font.setPointSize(11)
-            painter.setFont(font)
-            painter.setPen(QColor("#99aab5"))
-            painter.drawText(
-                self.rect().adjusted(24, 55, -24, 0),
-                Qt.AlignmentFlag.AlignCenter,
-                _("Перетащите JPEG, PNG, TIFF или нажмите «Импорт»"),
-            )
+            self._empty_state(painter)
             return
         rect = self.image_rect()
         # Transparent source media stays transparent; checkerboard exists only in the viewer.
         painter.save()
         painter.setClipRect(rect)
         cell = 16
-        painter.fillRect(rect, QColor("#343a3f"))
+        painter.fillRect(rect, QColor("#29292d"))
         for y in range(max(0, int(rect.top())), min(self.height(), int(rect.bottom()) + 1), cell):
             for x in range(
                 max(0, int(rect.left())), min(self.width(), int(rect.right()) + 1), cell
             ):
                 if ((x - int(rect.left())) // cell + (y - int(rect.top())) // cell) % 2:
-                    painter.fillRect(x, y, cell, cell, QColor("#3a4146"))
+                    painter.fillRect(x, y, cell, cell, QColor("#333337"))
         painter.drawImage(rect, self.before if self.mode == "before" else self.after)
         if self.mode == "compare":
             boundary = rect.left() + rect.width() * self.split
@@ -194,18 +182,21 @@ class CompareViewer(QWidget):
             )
             painter.drawImage(rect, self.before)
             painter.restore()
-            painter.setPen(QPen(QColor("#edf8f8"), 1.3))
+            painter.setPen(QPen(QColor("#ededf0"), 1.2))
             top = max(0.0, rect.top())
             bottom = min(float(self.height()), rect.bottom())
             if 0 <= boundary <= self.width():
                 painter.drawLine(QPointF(boundary, top), QPointF(boundary, bottom))
                 middle = min(max(self.height() * 0.5, top + 22), bottom - 22)
-                painter.setBrush(QColor("#e2edef"))
-                painter.drawRoundedRect(QRectF(boundary - 17, middle - 13, 34, 26), 8, 8)
-                painter.setPen(QColor("#243f48"))
-                painter.drawText(
-                    QRectF(boundary - 17, middle - 13, 34, 26), Qt.AlignmentFlag.AlignCenter, "‹  ›"
-                )
+                painter.setBrush(QColor(29, 29, 32, 235))
+                painter.setPen(QPen(QColor(237, 237, 240, 180), 1))
+                painter.drawRoundedRect(QRectF(boundary - 17, middle - 14, 34, 28), 5, 5)
+                painter.setPen(QPen(QColor("#ededf0"), 1.4))
+                for offset in (-3, 3):
+                    painter.drawLine(
+                        QPointF(boundary + offset, middle - 5),
+                        QPointF(boundary + offset, middle + 5),
+                    )
             self._badge(painter, rect, _("До"), left=True)
             self._badge(painter, rect, _("После"), left=False)
         else:
@@ -220,7 +211,7 @@ class CompareViewer(QWidget):
                 QPointF(rect.left() + x * rect.width(), rect.top() + y * rect.height())
                 for x, y in self._stroke_points
             ]
-            painter.setPen(QPen(QColor("#eefaff"), 2))
+            painter.setPen(QPen(QColor("#ededf0"), 2))
             if self.tool == "person_box" and len(points) > 1:
                 painter.drawRect(QRectF(points[0], points[-1]).normalized())
             else:
@@ -230,10 +221,56 @@ class CompareViewer(QWidget):
                 painter.drawPath(path)
         if self.edits_enabled and self.tool not in ("navigate", "waterline", "person_box"):
             radius = self.brush_radius * min(rect.width(), rect.height())
-            painter.setPen(QPen(QColor("#f2fbff"), 1))
+            painter.setPen(QPen(QColor("#ededf0"), 1))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawEllipse(self._hover_position, radius, radius)
         painter.restore()
+
+    def _empty_state(self, painter: QPainter) -> None:
+        center = QPointF(self.width() / 2, self.height() / 2 - 12)
+        painter.setPen(QPen(QColor("#3e3e44"), 1.4))
+        painter.setBrush(QColor("#1c1c1f"))
+        frame = QRectF(center.x() - 28, center.y() - 88, 56, 44)
+        painter.drawRoundedRect(frame, 7, 7)
+        painter.setBrush(QColor("#96969e"))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(QPointF(center.x() - 12, center.y() - 75), 3, 3)
+        landscape = QPainterPath(QPointF(center.x() - 19, center.y() - 53))
+        landscape.lineTo(center.x() - 5, center.y() - 65)
+        landscape.lineTo(center.x() + 3, center.y() - 58)
+        landscape.lineTo(center.x() + 10, center.y() - 64)
+        landscape.lineTo(center.x() + 19, center.y() - 55)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(QColor("#96969e"), 1.5))
+        painter.drawPath(landscape)
+
+        font = painter.font()
+        font.setPixelSize(17)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.setPen(QColor("#ededf0"))
+        painter.drawText(
+            QRectF(20, center.y() - 20, self.width() - 40, 30),
+            Qt.AlignmentFlag.AlignCenter,
+            _("Добавьте фото или видео"),
+        )
+        font.setPixelSize(12)
+        font.setBold(False)
+        painter.setFont(font)
+        painter.setPen(QColor("#96969e"))
+        painter.drawText(
+            QRectF(24, center.y() + 17, self.width() - 48, 40),
+            Qt.AlignmentFlag.AlignHCenter | Qt.TextFlag.TextWordWrap,
+            _("Перетащите файлы сюда или нажмите «Импорт»"),
+        )
+        font.setPixelSize(11)
+        painter.setFont(font)
+        painter.setPen(QColor("#6e6e78"))
+        painter.drawText(
+            QRectF(20, center.y() + 65, self.width() - 40, 24),
+            Qt.AlignmentFlag.AlignCenter,
+            "JPEG, PNG, TIFF, MP4, MOV",
+        )
 
     def _badge(self, painter: QPainter, image_rect: QRectF, text: str, left: bool) -> None:
         x = (
@@ -243,9 +280,13 @@ class CompareViewer(QWidget):
         )
         area = QRectF(x, max(12, image_rect.top() + 12), 64, 25)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(20, 29, 35, 205))
+        painter.setBrush(QColor(24, 24, 27, 215))
         painter.drawRoundedRect(area, 4, 4)
-        painter.setPen(QColor("#edf5f7"))
+        painter.setPen(QColor("#ededf0"))
+        font = painter.font()
+        font.setPixelSize(11)
+        font.setBold(False)
+        painter.setFont(font)
         painter.drawText(area, Qt.AlignmentFlag.AlignCenter, text)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
