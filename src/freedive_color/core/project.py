@@ -52,7 +52,7 @@ def json_bytes(data: dict) -> bytes:
     return (json.dumps(data, ensure_ascii=False, indent=2, allow_nan=False) + "\n").encode("utf-8")
 
 
-def save_settings(path: str | Path, settings: GradeSettings) -> None:
+def save_settings(path: str | Path, settings: GradeSettings, *, local_settings=None) -> None:
     """Explicit save dialog: still never overwrite an existing file."""
     try:
         with Path(path).open("xb") as handle:
@@ -62,6 +62,11 @@ def save_settings(path: str | Path, settings: GradeSettings) -> None:
                         "schema_version": SCHEMA_VERSION,
                         "kind": "preset",
                         "settings": settings.to_dict(),
+                        **(
+                            {"local_settings": local_settings.to_dict()}
+                            if local_settings is not None
+                            else {}
+                        ),
                     }
                 )
             )

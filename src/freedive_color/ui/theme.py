@@ -36,6 +36,9 @@ QListWidget::item {
 QListWidget::item:selected { background: #30454e; border: 1px solid #6ca7af; }
 QListWidget::item:hover { background: #2d3b44; }
 QScrollArea { border: none; background: #20262b; }
+QTabWidget::pane { border: none; }
+QTabBar::tab { background: #2b363e; color: #b9cbd3; padding: 9px 12px; }
+QTabBar::tab:selected { background: #36535a; color: #edf7f7; border-bottom: 2px solid #75c9cb; }
 QSplitter::handle { background: #39454e; width: 1px; }
 QSlider::groove:horizontal { height: 3px; background: #42515d; border-radius: 1px; }
 QSlider::sub-page:horizontal { background: #79b7c1; border-radius: 1px; }

@@ -1,0 +1,14 @@
+{
+  "name": "PPHumanSeg",
+  "file": "human_segmentation_pphumanseg_2023mar.onnx",
+  "bytes": 6163938,
+  "sha256": "552d8a984054e59b5d773d24b9b12022b22046ceb2bbc4c9aaeaceb36a9ddf24",
+  "source": "https://github.com/opencv/opencv_zoo/tree/main/models/human_segmentation_pphumanseg",
+  "download": "https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/human_segmentation_pphumanseg/human_segmentation_pphumanseg_2023mar.onnx",
+  "license": "Apache-2.0",
+  "license_file": "PPHUMANSEG_LICENSE.txt",
+  "license_source": "https://github.com/opencv/opencv_zoo/blob/main/models/human_segmentation_pphumanseg/LICENSE",
+  "attribution": "Copyright (c) 2021 PaddlePaddle Authors. All Rights Reserved. Model ported by OpenCV Zoo from PaddleHub.",
+  "runtime": "OpenCV DNN CPU; no runtime downloads",
+  "limitations": "General-purpose person silhouette segmentation, not an underwater skin model. Skin uses conservative color candidates inside confident person regions. Low confidence disables automatic skin correction; manual edits remain available."
+}

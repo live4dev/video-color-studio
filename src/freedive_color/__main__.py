@@ -8,7 +8,7 @@ def main() -> int:
         from .smoke import run
 
         return run(arguments)
-    if flags.intersection(("--input", "--output", "--help", "-h")):
+    if flags.intersection(("--input", "--project", "--output", "--help", "-h")):
         from .cli import run
 
         return run(arguments)

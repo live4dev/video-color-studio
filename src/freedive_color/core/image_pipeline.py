@@ -41,6 +41,60 @@ class Preview:
     photo: Photo
     analysis: SceneAnalysis
     result: np.ndarray
+    masks: object | None = None
+    local_warnings: tuple[str, ...] = ()
+    source_sha256: str = ""
+    reference: object | None = None
+
+
+def render_rgb(
+    rgb,
+    settings,
+    analysis=None,
+    *,
+    local_settings=None,
+    mask_edits=None,
+    reference=None,
+    masks=None,
+    check_cancelled=lambda: None,
+):
+    """Common photo/frame path; local processing is explicit for legacy v1 recipes."""
+    result = grade_image(rgb, settings, analysis, check_cancelled)
+    if local_settings is None and mask_edits is None and reference is None:
+        return result, None, ()
+    from .local_pipeline import LocalSettings, apply_local_grade
+    from .masks import MaskEdits
+
+    local = (
+        LocalSettings.from_dict(local_settings)
+        if isinstance(local_settings, dict)
+        else local_settings
+    )
+    edits = MaskEdits.from_dict(mask_edits) if isinstance(mask_edits, dict) else mask_edits
+    check_cancelled()
+    processed = apply_local_grade(
+        rgb,
+        result,
+        local or LocalSettings(),
+        edits=edits or MaskEdits(),
+        masks=masks,
+        reference=reference,
+    )
+    check_cancelled()
+    return processed.rgb, processed.masks, tuple(processed.warnings)
+
+
+def create_image_reference(source: str | Path):
+    from .masks import build_masks
+    from .reference import create_reference
+
+    photo = load_photo(source, max_edge=1440)
+    return create_reference(
+        photo.rgb,
+        build_masks(photo.rgb),
+        source_name=photo.path.name,
+        source_sha256=sha256_file(photo.path),
+    )
 
 
 def _publish(
@@ -70,13 +124,26 @@ def make_preview(
     settings: GradeSettings,
     max_edge: int = 1440,
     token: CancellationToken | None = None,
+    *,
+    local_settings=None,
+    mask_edits=None,
+    reference=None,
 ) -> Preview:
     token = token or CancellationToken()
     token.check()
     photo = load_photo(path, max_edge=max_edge)
     token.check()
     analysis = analyze_scene(photo.rgb)
-    return Preview(photo, analysis, grade_image(photo.rgb, settings, analysis, token.check))
+    result, masks, warnings = render_rgb(
+        photo.rgb,
+        settings,
+        analysis,
+        local_settings=local_settings,
+        mask_edits=mask_edits,
+        reference=reference,
+        check_cancelled=token.check,
+    )
+    return Preview(photo, analysis, result, masks, warnings)
 
 
 def export_photo(
@@ -91,6 +158,9 @@ def export_photo(
     token: CancellationToken | None = None,
     progress: Callable[[int, str], None] = lambda _value, _message: None,
     expected_signature: tuple[int, int] | None = None,
+    local_settings=None,
+    mask_edits=None,
+    reference=None,
 ) -> dict:
     started = time.perf_counter()
     source = Path(source).expanduser().resolve()
@@ -124,7 +194,15 @@ def export_photo(
             raise StudioError("Недостаточно свободного места. Выберите другую папку экспорта.")
         analysis = analysis or analyze_scene(photo.rgb)
         progress(25, "Цветокоррекция полного разрешения…")
-        result = grade_image(photo.rgb, settings, analysis, token.check)
+        result, masks, local_warnings = render_rgb(
+            photo.rgb,
+            settings,
+            analysis,
+            local_settings=local_settings,
+            mask_edits=mask_edits,
+            reference=reference,
+            check_cancelled=token.check,
+        )
         token.check()
         progress(65, "Запись изображения…")
         fd, name = tempfile.mkstemp(prefix=".freedive-", suffix=".tmp", dir=destination.parent)
@@ -138,7 +216,7 @@ def export_photo(
         digest = sha256_file(source)
         if signature(source) != photo.stat_signature:
             raise StudioError("Оригинал изменился во время экспорта. Повторите импорт.")
-        warnings = photo.warnings + list(analysis.warnings)
+        warnings = photo.warnings + list(analysis.warnings) + list(local_warnings)
         if bit_depth == 16 and output_format == "TIFF":
             warnings.append(
                 "TIFF 16 бит: перенесены только базовые TIFF-теги; EXIF/GPS не перенесены."
@@ -161,6 +239,12 @@ def export_photo(
             },
             "settings": settings.to_dict(),
             "analysis": analysis.to_dict(),
+            "local_settings": (
+                local_settings.to_dict() if hasattr(local_settings, "to_dict") else local_settings
+            ),
+            "mask_edits": (mask_edits.to_dict() if hasattr(mask_edits, "to_dict") else mask_edits),
+            "reference": reference.to_dict() if reference is not None else None,
+            "masks": masks.to_metadata() if masks is not None else None,
             "warnings": warnings,
             "metrics": {
                 "seconds": round(time.perf_counter() - started, 3),

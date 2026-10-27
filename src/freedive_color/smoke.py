@@ -17,6 +17,7 @@ def run(arguments: list[str]) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--smoke-test", required=True, type=Path, metavar="PHOTO")
     parser.add_argument("--evidence", required=True, type=Path)
+    parser.add_argument("--show-mask", choices=("skin", "person", "water"))
     args = parser.parse_args(arguments)
     args.evidence.mkdir(parents=True, exist_ok=True)
     source_hash = sha256_file(args.smoke_test)
@@ -63,6 +64,10 @@ def run(arguments: list[str]) -> int:
 
         def capture_and_exit():
             window.viewer.fit()
+            if args.show_mask:
+                window.settings_tabs.setCurrentWidget(window.local_controls)
+                window.local_controls.overlay_combo.setCurrentIndex(
+                    window.local_controls.overlay_combo.findData(args.show_mask))
             focused = app.focusWidget()
             if focused:
                 focused.clearFocus()

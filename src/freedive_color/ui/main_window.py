@@ -1,6 +1,7 @@
+from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt, QThreadPool, QTimer, Signal
+from PySide6.QtCore import QSignalBlocker, QSize, Qt, QThreadPool, QTimer, Signal
 from PySide6.QtGui import QAction, QCloseEvent, QIcon, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -20,31 +21,54 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QSplitter,
     QStyle,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
-from freedive_color.core.analyze import analyze_scene
-from freedive_color.core.color_pipeline import grade_image
+from freedive_color.core.analyze import SceneAnalysis, analyze_scene
+from freedive_color.core.batch import export_batch
 from freedive_color.core.errors import StudioError
-from freedive_color.core.image_pipeline import CancellationToken, Preview, export_photo
+from freedive_color.core.image_pipeline import (
+    CancellationToken,
+    Preview,
+    create_image_reference,
+    export_photo,
+    render_rgb,
+)
+from freedive_color.core.local_pipeline import LocalSettings
+from freedive_color.core.masks import BrushStroke, MaskEdits
 from freedive_color.core.media_io import PHOTO_EXTENSIONS, load_photo
 from freedive_color.core.presets import GradeSettings, get_preset
-from freedive_color.core.project import load_settings, save_settings
+from freedive_color.core.project import load_settings, read_json, save_settings, sha256_file
+from freedive_color.core.reference import PaletteReference
+from freedive_color.core.session import (
+    ExportOptions,
+    Session,
+    SessionItem,
+    load_session,
+    save_session,
+)
 
 from .controls import GradeControls
+from .local_controls import LocalControls
 from .strings import _
 from .viewer import CompareViewer, to_qimage
 from .workers import Worker
 
 PATH_ROLE = Qt.ItemDataRole.UserRole
 SETTINGS_ROLE = Qt.ItemDataRole.UserRole + 1
+LOCAL_ROLE = Qt.ItemDataRole.UserRole + 2
+MASK_ROLE = Qt.ItemDataRole.UserRole + 3
+ANALYSIS_ROLE = Qt.ItemDataRole.UserRole + 4
+INFO_ROLE = Qt.ItemDataRole.UserRole + 5
 OPEN_FILTER = "Фото SDR (*.jpg *.jpeg *.png *.tif *.tiff)"
 
 
 class MainWindow(QMainWindow):
     preview_ready = Signal()
     export_completed = Signal(object)
+    batch_completed = Signal(object)
     operation_failed = Signal(str)
 
     def __init__(self):
@@ -58,6 +82,13 @@ class MainWindow(QMainWindow):
         self.preview: Preview | None = None
         self.rendered_settings: GradeSettings | None = None
         self.last_export: dict | None = None
+        self.mask_edits = MaskEdits()
+        self.reference = None
+        self.reference_path = None
+        self.session_path = None
+        self.temp_directory = None
+        self.output_directory = None
+        self.last_batch = None
         self._jobs: dict[int, tuple[Worker, str, object]] = {}
         self._counter = 0
         self._view_job: int | None = None
@@ -86,7 +117,7 @@ class MainWindow(QMainWindow):
         brand = QLabel("Freedive Color Studio")
         brand.setObjectName("brand")
         header_layout.addWidget(brand)
-        stage = QLabel(_("Фото · v0.1"))
+        stage = QLabel(_("Фото · v0.2"))
         stage.setObjectName("subtle")
         header_layout.addWidget(stage)
         header_layout.addStretch()
@@ -95,6 +126,9 @@ class MainWindow(QMainWindow):
         self.import_button.setToolTip(_("Открыть фотографии · ⌘O / Ctrl+O"))
         self.import_button.clicked.connect(self.open_dialog)
         header_layout.addWidget(self.import_button)
+        self.batch_button = QPushButton(_("Экспорт серии"))
+        self.batch_button.clicked.connect(self.batch_export_dialog)
+        header_layout.addWidget(self.batch_button)
         self.export_button = QPushButton(_("Экспорт фото"))
         self.export_button.setObjectName("primary")
         self.export_button.clicked.connect(self.export_dialog)
@@ -119,7 +153,7 @@ class MainWindow(QMainWindow):
         self.library = QListWidget()
         self.library.setObjectName("library")
         self.library.setIconSize(QSize(68, 58))
-        self.library.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.library.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.library.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.library.currentItemChanged.connect(self._selection_changed)
         self.library.itemDoubleClicked.connect(lambda _item: self._load_selected())
@@ -128,6 +162,9 @@ class MainWindow(QMainWindow):
         folder_button.clicked.connect(self.open_folder)
         self.folder_button = folder_button
         library_layout.addWidget(folder_button)
+        self.apply_group_button = QPushButton(_("Настройки → выбранным"))
+        self.apply_group_button.clicked.connect(self.apply_to_selected)
+        library_layout.addWidget(self.apply_group_button)
         note = QLabel(_("JPEG, PNG, TIFF\nОбработка на этом компьютере"))
         note.setObjectName("metadata")
         note.setWordWrap(True)
@@ -167,6 +204,9 @@ class MainWindow(QMainWindow):
         self.viewer = CompareViewer()
         self.viewer.open_requested.connect(self.open_dialog)
         self.viewer.zoom_changed.connect(self._zoom_changed)
+        self.viewer.stroke_created.connect(self._add_stroke)
+        self.viewer.waterline_changed.connect(self._set_waterline)
+        self.viewer.person_box_changed.connect(self._set_person_box)
         self.fit_button.clicked.connect(self.viewer.fit)
         self.one_button.clicked.connect(self._one_to_one)
         center_layout.addWidget(self.viewer, 1)
@@ -196,7 +236,22 @@ class MainWindow(QMainWindow):
         right_layout.setSpacing(6)
         self.controls = GradeControls()
         self.controls.settings_changed.connect(self._settings_changed)
-        right_layout.addWidget(self.controls)
+        tabs = QTabWidget()
+        self.settings_tabs = tabs
+        tabs.addTab(self.controls, _("Свет и цвет"))
+        self.local_controls = LocalControls()
+        self.local_controls.settings_changed.connect(self._local_settings_changed)
+        self.local_controls.overlay_changed.connect(self._update_mask_overlay)
+        self.local_controls.tool_changed.connect(self.viewer.set_tool)
+        self.local_controls.radius_changed.connect(
+            lambda value: setattr(self.viewer, "brush_radius", value)
+        )
+        self.local_controls.undo_requested.connect(self.undo_mask_edit)
+        self.local_controls.reset_requested.connect(self.reset_mask_edits)
+        self.local_controls.reference_requested.connect(self.reference_dialog)
+        self.local_controls.clear_reference_requested.connect(self.clear_reference)
+        tabs.addTab(self.local_controls, _("Области и маски"))
+        right_layout.addWidget(tabs)
         presets_row = QHBoxLayout()
         presets_row.setContentsMargins(16, 0, 16, 8)
         save_button = QPushButton(_("Сохранить…"))
@@ -244,9 +299,7 @@ class MainWindow(QMainWindow):
         export_note.setWordWrap(True)
         export_note.setObjectName("metadata")
         export_layout.addWidget(export_note)
-        stage_note = QLabel(
-            _("Регуляторы действуют на весь снимок. Кожа и вода изменяются вместе.")
-        )
+        stage_note = QLabel(_("Маски кожи и воды доступны во вкладке «Области и маски»."))
         stage_note.setWordWrap(True)
         stage_note.setObjectName("metadata")
         export_layout.addWidget(stage_note)
@@ -287,6 +340,22 @@ class MainWindow(QMainWindow):
         open_action.setShortcut(QKeySequence.StandardKey.Open)
         open_action.triggered.connect(self.open_dialog)
         file_menu.addAction(open_action)
+        reimport_action = QAction(_("Повторно импортировать выбранный файл"), self)
+        reimport_action.triggered.connect(self.reimport_selected)
+        file_menu.addAction(reimport_action)
+        project_open = QAction(_("Открыть проект…"), self)
+        project_open.triggered.connect(self.open_project_dialog)
+        file_menu.addAction(project_open)
+        project_save = QAction(_("Сохранить проект"), self)
+        project_save.setShortcut(QKeySequence.StandardKey.Save)
+        project_save.triggered.connect(lambda: self.save_project_dialog())
+        file_menu.addAction(project_save)
+        project_save_as = QAction(_("Сохранить проект как…"), self)
+        project_save_as.triggered.connect(lambda: self.save_project_dialog(save_as=True))
+        file_menu.addAction(project_save_as)
+        temp_folder = QAction(_("Папка временных файлов…"), self)
+        temp_folder.triggered.connect(self.choose_temp_directory)
+        file_menu.addAction(temp_folder)
         self.export_action = QAction(_("Экспорт фотографии…"), self)
         self.export_action.setShortcut(QKeySequence("Ctrl+Shift+S"))
         self.export_action.triggered.connect(self.export_dialog)
@@ -319,6 +388,12 @@ class MainWindow(QMainWindow):
         self.library.setEnabled(not exporting)
         self.right_panel.setEnabled(not exporting)
         self.controls.setEnabled(self.preview is not None and not exporting)
+        self.local_controls.setEnabled(self.preview is not None and not exporting)
+        self.viewer.edits_enabled = self.preview is not None and not exporting
+        self.batch_button.setEnabled(
+            self.library.count() > 0 and not exporting and not self._render_pending
+        )
+        self.apply_group_button.setEnabled(self.preview is not None and not exporting)
         self.fit_button.setEnabled(self.preview is not None)
         self.one_button.setEnabled(self.preview is not None and not self._full_loading)
 
@@ -374,6 +449,10 @@ class MainWindow(QMainWindow):
             item.setToolTip(resolved)
             item.setData(PATH_ROLE, resolved)
             item.setData(SETTINGS_ROLE, get_preset("natural").to_dict())
+            item.setData(LOCAL_ROLE, LocalSettings().to_dict())
+            item.setData(MASK_ROLE, MaskEdits().to_dict())
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Checked)
             item.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon))
             self.library.addItem(item)
             existing.add(resolved)
@@ -387,7 +466,7 @@ class MainWindow(QMainWindow):
             self._status(_("В этой папке нет JPEG, PNG или TIFF."), error=True)
         if unsupported:
             self._status(
-                _("В этапе A доступны JPEG, PNG и TIFF. Не открыто: ") + ", ".join(unsupported[:3]),
+                _("Поддерживаются JPEG, PNG и TIFF. Не открыто: ") + ", ".join(unsupported[:3]),
                 error=True,
             )
 
@@ -396,12 +475,17 @@ class MainWindow(QMainWindow):
             self.controls.set_settings(
                 GradeSettings.from_dict(current.data(SETTINGS_ROLE)), emit=False
             )
+            self.local_controls.set_settings(
+                LocalSettings.from_dict(current.data(LOCAL_ROLE) or {}), emit=False
+            )
+            self.mask_edits = MaskEdits.from_dict(current.data(MASK_ROLE) or {})
             self._load_selected()
 
     def _cancel_view_job(self) -> None:
         if self._view_job in self._jobs:
             self._jobs[self._view_job][0].token.cancel()
         self._view_job = None
+        self._full_loading = False
 
     def _load_selected(self, full_resolution: bool = False) -> None:
         item = self.library.currentItem()
@@ -411,6 +495,12 @@ class MainWindow(QMainWindow):
         self._cancel_view_job()
         source = Path(item.data(PATH_ROLE))
         settings = self.controls.settings()
+        local = self.local_controls.settings()
+        edits = self.mask_edits
+        reference = self.reference
+        reference_path = self.reference_path
+        cached_analysis = item.data(ANALYSIS_ROLE)
+        cached_info = item.data(INFO_ROLE) or {}
         saved_analysis = self.preview.analysis if full_resolution and self.preview else None
         expected_signature = (
             self.preview.photo.stat_signature if full_resolution and self.preview else None
@@ -433,14 +523,48 @@ class MainWindow(QMainWindow):
             if expected_signature and photo.stat_signature != expected_signature:
                 raise StudioError(_("Оригинал изменился. Импортируйте его ещё раз."))
             token.check()
-            analysis = saved_analysis or analyze_scene(photo.rgb)
+            digest = sha256_file(source)
+            resolved_reference = reference
+            if resolved_reference is None and reference_path is not None:
+                try:
+                    resolved_reference = create_image_reference(reference_path)
+                except StudioError as exc:
+                    photo.warnings.append(_("Эталон недоступен: ") + str(exc))
+            if saved_analysis:
+                analysis = saved_analysis
+            elif cached_analysis and cached_info.get("sha256") == digest:
+                analysis = SceneAnalysis.from_dict(cached_analysis)
+            else:
+                analysis = analyze_scene(photo.rgb)
+                if cached_info.get("sha256") and cached_info["sha256"] != digest:
+                    raise StudioError(
+                        _(
+                            "Исходник изменился. Выберите «Файл → Повторно импортировать», "
+                            "чтобы сбросить старые маски и анализ."
+                        )
+                    )
             progress(50, _("Создание предпросмотра…"))
-            result = grade_image(photo.rgb, settings, analysis, token.check)
-            return Preview(photo, analysis, result)
+            result, masks, warnings = render_rgb(
+                photo.rgb,
+                settings,
+                analysis,
+                local_settings=local,
+                mask_edits=edits,
+                reference=resolved_reference,
+                check_cancelled=token.check,
+            )
+            return Preview(photo, analysis, result, masks, warnings, digest, resolved_reference)
 
         def success(preview):
             self.preview = preview
+            if self.reference is None and preview.reference is not None:
+                self.reference = preview.reference
+                self.local_controls.reference_label.setText(
+                    _("Эталон: ") + self.reference.source_name
+                )
             self.rendered_settings = settings
+            self.rendered_local_settings = local
+            self.rendered_mask_edits = edits
             self._render_pending = False
             self._full_loading = False
             self.viewer.set_images(
@@ -460,6 +584,8 @@ class MainWindow(QMainWindow):
             )
             item.setIcon(QIcon(thumb))
             item.setText(source.name + "\n" + _("Готово"))
+            item.setData(ANALYSIS_ROLE, preview.analysis.to_dict())
+            item.setData(INFO_ROLE, {**photo.metadata(), "sha256": preview.source_sha256})
             self.image_title.setText(source.name)
             proxy_note = (
                 _("полное разрешение")
@@ -470,7 +596,16 @@ class MainWindow(QMainWindow):
                 f"{photo.width} × {photo.height} px · {photo.bit_depth} бит · "
                 f"{photo.profile_status} · {proxy_note}"
             )
-            self.warning_label.setText("\n".join(photo.warnings + list(preview.analysis.warnings)))
+            self.warning_label.setText(
+                "\n".join(
+                    dict.fromkeys(
+                        photo.warnings
+                        + list(preview.analysis.warnings)
+                        + list(preview.local_warnings)
+                    )
+                )
+            )
+            self._update_mask_overlay()
             self.setWindowTitle(f"{source.name} — Freedive Color Studio")
             self._status(_("Перетащите линию для сравнения. Все регуляторы доступны справа."))
             self.preview_ready.emit()
@@ -495,16 +630,35 @@ class MainWindow(QMainWindow):
         photo = self.preview.photo
         analysis = self.preview.analysis
         settings = self.controls.settings()
+        local = self.local_controls.settings()
+        edits = self.mask_edits
+        reference = self.reference
+        previous = self.preview
         self._status(_("Обновление цвета…"))
 
         def operation(token, _progress):
-            return grade_image(photo.rgb, settings, analysis, token.check)
+            return render_rgb(
+                photo.rgb,
+                settings,
+                analysis,
+                local_settings=local,
+                mask_edits=edits,
+                reference=reference,
+                check_cancelled=token.check,
+            )
 
-        def success(result):
-            self.preview.result = result
+        def success(processed):
+            result, masks, warnings = processed
+            self.preview = Preview(photo, analysis, result, masks, warnings, previous.source_sha256)
             self.rendered_settings = settings
+            self.rendered_local_settings = local
+            self.rendered_mask_edits = edits
             self._render_pending = False
             self.viewer.set_images(self.viewer.before, to_qimage(result, photo.alpha), photo.width)
+            self.warning_label.setText(
+                "\n".join(dict.fromkeys(photo.warnings + list(analysis.warnings) + list(warnings)))
+            )
+            self._update_mask_overlay()
             self._status(_("Предпросмотр обновлён"))
             self.preview_ready.emit()
 
@@ -518,6 +672,317 @@ class MainWindow(QMainWindow):
             self._load_selected(full_resolution=True)
         else:
             self.viewer.one_to_one()
+
+    def _local_settings_changed(self, settings: LocalSettings) -> None:
+        item = self.library.currentItem()
+        if item:
+            item.setData(LOCAL_ROLE, settings.to_dict())
+        self._settings_changed(self.controls.settings())
+
+    def _mask_changed(self, edits: MaskEdits) -> None:
+        if self._export_job is not None or self.preview is None:
+            return
+        self.mask_edits = edits
+        item = self.library.currentItem()
+        if item:
+            item.setData(MASK_ROLE, edits.to_dict())
+        self._settings_changed(self.controls.settings())
+
+    def _add_stroke(self, values: dict) -> None:
+        try:
+            stroke = BrushStroke.from_dict(values)
+            self._mask_changed(replace(self.mask_edits, strokes=(*self.mask_edits.strokes, stroke)))
+            target_index = self.local_controls.overlay_combo.findData(stroke.target)
+            self.local_controls.overlay_combo.setCurrentIndex(target_index)
+        except StudioError as exc:
+            self._status(str(exc), error=True)
+
+    def _set_waterline(self, points) -> None:
+        by_x = {round(float(x), 5): float(y) for x, y in points}
+        line = sorted(by_x.items())
+        if len(line) == 1:
+            line = [(0.0, line[0][1]), (1.0, line[0][1])]
+        if len(line) > 256:
+            line = [line[round(index * (len(line) - 1) / 255)] for index in range(256)]
+        try:
+            self._mask_changed(replace(self.mask_edits, waterline=tuple(line)))
+            self.local_controls.overlay_combo.setCurrentIndex(
+                self.local_controls.overlay_combo.findData("underwater")
+            )
+        except StudioError as exc:
+            self._status(str(exc), error=True)
+
+    def _set_person_box(self, box) -> None:
+        try:
+            self._mask_changed(replace(self.mask_edits, person_box=tuple(box)))
+        except StudioError as exc:
+            self._status(str(exc), error=True)
+
+    def undo_mask_edit(self) -> None:
+        if self.mask_edits.strokes:
+            self._mask_changed(replace(self.mask_edits, strokes=self.mask_edits.strokes[:-1]))
+        elif self.mask_edits.waterline:
+            self._mask_changed(replace(self.mask_edits, waterline=()))
+        elif self.mask_edits.person_box:
+            self._mask_changed(replace(self.mask_edits, person_box=None))
+
+    def reset_mask_edits(self) -> None:
+        self._mask_changed(MaskEdits())
+
+    def reimport_selected(self) -> None:
+        item = self.library.currentItem()
+        if item and self._export_job is None:
+            self.mask_edits = MaskEdits()
+            item.setData(MASK_ROLE, self.mask_edits.to_dict())
+            item.setData(ANALYSIS_ROLE, None)
+            item.setData(INFO_ROLE, {})
+            self._load_selected()
+
+    def _update_mask_overlay(self, _mode=None) -> None:
+        target = self.local_controls.overlay_combo.currentData()
+        masks = self.preview.masks if self.preview else None
+        self.viewer.set_mask_overlay(
+            getattr(masks, target, None) if target != "none" else None, target
+        )
+        if masks:
+            self.local_controls.confidence_label.setText(
+                _("Уверенность маски кожи: ")
+                + f"{masks.skin_confidence:.0%}\n"
+                + "\n".join(masks.warnings)
+            )
+
+    def apply_to_selected(self) -> None:
+        if self._export_job is not None:
+            return
+        items = self.library.selectedItems()
+        for item in items:
+            item.setData(SETTINGS_ROLE, self.controls.settings().to_dict())
+            item.setData(LOCAL_ROLE, self.local_controls.settings().to_dict())
+        self._status(_("Настройки применены к снимкам: ") + str(len(items)))
+
+    def reference_dialog(self) -> None:
+        path, _selected = QFileDialog.getOpenFileName(self, _("Цветовой эталон"), "", OPEN_FILTER)
+        if path:
+            self.set_reference(Path(path))
+
+    def set_reference(self, path: Path) -> None:
+        if self._export_job is not None:
+            return
+        self._cancel_view_job()
+        self._debounce.stop()
+        self._render_pending = True
+
+        def operation(token, _progress):
+            token.check()
+            return create_image_reference(path)
+
+        def success(reference):
+            self.reference, self.reference_path = reference, path.resolve()
+            self.local_controls.reference_label.setText(_("Эталон: ") + path.name)
+            self._local_settings_changed(self.local_controls.settings())
+
+        self._submit("view", operation, success)
+        self._update_actions()
+
+    def clear_reference(self) -> None:
+        self.reference, self.reference_path = None, None
+        self.local_controls.reference_label.setText(_("Эталон не выбран"))
+        self._local_settings_changed(self.local_controls.settings())
+
+    def _export_options(self) -> ExportOptions:
+        return ExportOptions(
+            self.format_combo.currentData(),
+            self.depth_combo.currentData(),
+            self.quality_spin.value(),
+            self.gps_check.isChecked(),
+        )
+
+    def _session_items(self) -> tuple[SessionItem, ...]:
+        records = []
+        for row in range(self.library.count()):
+            item = self.library.item(row)
+            info = item.data(INFO_ROLE) or {}
+            records.append(
+                SessionItem(
+                    Path(item.data(PATH_ROLE)),
+                    GradeSettings.from_dict(item.data(SETTINGS_ROLE)),
+                    item.checkState() == Qt.CheckState.Checked,
+                    item.data(LOCAL_ROLE) or {},
+                    item.data(MASK_ROLE) or {},
+                    item.data(ANALYSIS_ROLE),
+                    info,
+                    info.get("sha256"),
+                )
+            )
+        return tuple(records)
+
+    def save_project(self, path: Path, overwrite: bool = False) -> None:
+        session = Session(
+            self._session_items(),
+            self.reference_path,
+            self.reference.to_dict() if self.reference else None,
+            self.temp_directory,
+            self.output_directory,
+            self._export_options(),
+            self.library.currentRow() if self.library.currentRow() >= 0 else None,
+        )
+        save_session(path, session, overwrite=overwrite)
+        self.session_path = Path(path).resolve()
+        self._status(_("Проект сохранён: ") + str(path))
+
+    def save_project_dialog(self, save_as=False) -> None:
+        if self._export_job is not None:
+            return
+        path = self.session_path if not save_as else None
+        if path is None:
+            chosen, _selected = QFileDialog.getSaveFileName(
+                self,
+                _("Сохранить проект"),
+                "freedive.fcsproj",
+                "Freedive Project (*.fcsproj *.json)",
+            )
+            if not chosen:
+                return
+            path = Path(chosen)
+            if not path.suffix:
+                path = path.with_suffix(".fcsproj")
+        try:
+            self.save_project(path, overwrite=path == self.session_path)
+        except StudioError as exc:
+            self._status(str(exc), error=True)
+
+    def open_project_dialog(self) -> None:
+        path, _selected = QFileDialog.getOpenFileName(
+            self, _("Открыть проект"), "", "Freedive Project (*.fcsproj *.json)"
+        )
+        if path:
+            try:
+                self.load_project(Path(path))
+            except StudioError as exc:
+                self._status(str(exc), error=True)
+
+    def load_project(self, path: Path) -> None:
+        if self._export_job is not None:
+            return
+        session = load_session(path)
+        self._cancel_view_job()
+        self._debounce.stop()
+        self.preview = None
+        blocker = QSignalBlocker(self.library)
+        self.library.clear()
+        for record in session.items:
+            item = QListWidgetItem(record.path.name)
+            item.setData(PATH_ROLE, str(record.path))
+            item.setData(SETTINGS_ROLE, record.settings.to_dict())
+            item.setData(
+                LOCAL_ROLE,
+                record.local_settings
+                or LocalSettings(
+                    enabled=bool(
+                        record.mask_edits or session.reference_data or session.reference_path
+                    )
+                ).to_dict(),
+            )
+            item.setData(MASK_ROLE, record.mask_edits or MaskEdits().to_dict())
+            item.setData(ANALYSIS_ROLE, record.analysis)
+            item.setData(
+                INFO_ROLE,
+                {
+                    **record.media_info,
+                    **({"sha256": record.source_sha256} if record.source_sha256 else {}),
+                },
+            )
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(
+                Qt.CheckState.Checked if record.included else Qt.CheckState.Unchecked
+            )
+            item.setToolTip(str(record.path))
+            self.library.addItem(item)
+        del blocker
+        self.reference_path = session.reference_path
+        self.reference = (
+            PaletteReference.from_dict(session.reference_data) if session.reference_data else None
+        )
+        self.local_controls.reference_label.setText(
+            _("Эталон: ") + self.reference.source_name if self.reference else _("Эталон не выбран")
+        )
+        self.temp_directory, self.output_directory = (
+            session.temp_directory,
+            session.output_directory,
+        )
+        suffix = {".jpeg": ".jpg", ".tif": ".tiff"}.get(
+            session.export_options.suffix, session.export_options.suffix
+        )
+        self.format_combo.setCurrentIndex(self.format_combo.findData(suffix))
+        self.depth_combo.setCurrentIndex(
+            self.depth_combo.findData(session.export_options.bit_depth)
+        )
+        self.quality_spin.setValue(session.export_options.quality)
+        self.gps_check.setChecked(session.export_options.keep_gps and self.gps_check.isEnabled())
+        self.session_path = Path(path).resolve()
+        self.library_count.setText(_("Фотографий: ") + str(self.library.count()))
+        if session.items:
+            self.library.setCurrentRow(session.selected_index or 0)
+        else:
+            self.viewer.clear()
+            self._render_pending = False
+            self._update_actions()
+
+    def batch_export_dialog(self) -> None:
+        path = QFileDialog.getExistingDirectory(
+            self, _("Папка результатов серии"), str(self.output_directory or Path.home())
+        )
+        if path:
+            self.start_batch_export(Path(path))
+
+    def start_batch_export(self, directory: Path) -> None:
+        if self._export_job is not None:
+            return
+        items, options, reference = self._session_items(), self._export_options(), self.reference
+        self._cancel_view_job()
+        self._debounce.stop()
+        self._render_pending = False
+        self.output_directory = Path(directory).resolve()
+
+        def operation(token, progress):
+            return export_batch(
+                items,
+                directory,
+                options,
+                token=token,
+                reference=reference,
+                progress=lambda done, total, message: progress(
+                    round(done / max(1, total) * 100), message
+                ),
+            )
+
+        def success(result):
+            self.last_batch = result
+            statuses = {record.source: record for record in result.records}
+            for row in range(self.library.count()):
+                item = self.library.item(row)
+                record = statuses.get(Path(item.data(PATH_ROLE)))
+                if record:
+                    caption = {
+                        "completed": "Экспортировано",
+                        "failed": "Ошибка",
+                        "excluded": "Исключён",
+                        "cancelled": "Отменён",
+                        "not_started": "Не обработан",
+                    }.get(record.status, record.status)
+                    item.setText(record.source.name + "\n" + _(caption))
+                    if record.error:
+                        item.setToolTip(record.error)
+            self._status(
+                f"{_('Готово')}: {result.completed}; {_('ошибок')}: {result.failed}; "
+                f"{_('исключено')}: {result.excluded}"
+                + (_(" · Отменено") if result.cancelled else ""),
+                error=bool(result.failed),
+            )
+            self.batch_completed.emit(result)
+
+        self._submit("export", operation, success)
+        self._update_actions()
 
     def _zoom_changed(self, scale: float) -> None:
         self.zoom_label.setText(f"{scale * 100:.0f}%")
@@ -579,6 +1044,7 @@ class MainWindow(QMainWindow):
         settings = self.controls.settings()
         depth, quality = self.depth_combo.currentData(), self.quality_spin.value()
         keep_gps = self.gps_check.isChecked()
+        local, edits, reference = self.local_controls.settings(), self.mask_edits, self.reference
         self._status(_("Экспорт фотографии в исходном размере…"))
 
         def operation(token, progress):
@@ -591,6 +1057,9 @@ class MainWindow(QMainWindow):
                 quality=quality,
                 keep_gps=keep_gps,
                 expected_signature=photo.stat_signature,
+                local_settings=local,
+                mask_edits=edits,
+                reference=reference,
                 token=token,
                 progress=progress,
             )
@@ -611,7 +1080,11 @@ class MainWindow(QMainWindow):
         )
         if path:
             try:
-                save_settings(Path(path).with_suffix(".json"), self.controls.settings())
+                save_settings(
+                    Path(path).with_suffix(".json"),
+                    self.controls.settings(),
+                    local_settings=self.local_controls.settings(),
+                )
                 self._status(_("Настройки сохранены"))
             except StudioError as exc:
                 self._status(str(exc), error=True)
@@ -622,6 +1095,14 @@ class MainWindow(QMainWindow):
         )
         if path:
             try:
+                data = read_json(path)
+                if data.get("local_settings") is not None:
+                    self.local_controls.set_settings(
+                        LocalSettings.from_dict(data["local_settings"]), emit=False
+                    )
+                    item = self.library.currentItem()
+                    if item:
+                        item.setData(LOCAL_ROLE, self.local_controls.settings().to_dict())
                 self.controls.set_settings(load_settings(path))
             except StudioError as exc:
                 self._status(str(exc), error=True)
@@ -658,8 +1139,15 @@ class MainWindow(QMainWindow):
         self._full_loading = False
         if identifier == self._view_job and self.preview and self.rendered_settings:
             self.controls.set_settings(self.rendered_settings, emit=False)
+            if hasattr(self, "rendered_local_settings"):
+                self.local_controls.set_settings(self.rendered_local_settings, emit=False)
+                self.mask_edits = self.rendered_mask_edits
             if self.library.currentItem():
                 self.library.currentItem().setData(SETTINGS_ROLE, self.rendered_settings.to_dict())
+                self.library.currentItem().setData(
+                    LOCAL_ROLE, self.local_controls.settings().to_dict()
+                )
+                self.library.currentItem().setData(MASK_ROLE, self.mask_edits.to_dict())
         self._status(message, error=not cancelled)
         if not cancelled:
             self.operation_failed.emit(message)
@@ -692,12 +1180,28 @@ class MainWindow(QMainWindow):
             self._render_pending = False
             if self.rendered_settings:
                 self.controls.set_settings(self.rendered_settings, emit=False)
+                if hasattr(self, "rendered_local_settings"):
+                    self.local_controls.set_settings(self.rendered_local_settings, emit=False)
+                    self.mask_edits = self.rendered_mask_edits
+                item = self.library.currentItem()
+                if item:
+                    item.setData(SETTINGS_ROLE, self.controls.settings().to_dict())
+                    item.setData(LOCAL_ROLE, self.local_controls.settings().to_dict())
+                    item.setData(MASK_ROLE, self.mask_edits.to_dict())
             self._update_actions()
         self._status(_("Отмена…"))
 
     def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasUrls() and self._export_job is None:
             event.acceptProposedAction()
+
+    def choose_temp_directory(self) -> None:
+        path = QFileDialog.getExistingDirectory(
+            self, _("Папка временных файлов"), str(self.temp_directory or Path.home())
+        )
+        if path:
+            self.temp_directory = Path(path).resolve()
+            self._status(_("Временные файлы: ") + str(self.temp_directory))
 
     def dropEvent(self, event) -> None:
         self.import_paths(

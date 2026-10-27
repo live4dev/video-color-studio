@@ -1,5 +1,14 @@
 # Зависимости и происхождение
 
+## Модель сегментации этапа B
+
+`src/freedive_color/assets/models/human_segmentation_pphumanseg_2023mar.onnx`:
+OpenCV Zoo / PaddleSeg PPHumanSeg, Apache-2.0, 6 163 938 байт.
+SHA-256 `552d8a984054e59b5d773d24b9b12022b22046ceb2bbc4c9aaeaceb36a9ddf24`.
+Лицензия, источник и описание находятся рядом с моделью. Модель только классифицирует
+пиксели; не генерирует изображение, не обращается в сеть и работает на CPU через
+OpenCV DNN. Уточнение GrabCut выполняется локально с фиксированными параметрами.
+
 Исходный код Freedive Color Studio распространяется по MIT (LICENSE).
 Версии и хеши wheel-дистрибутивов фиксирует `uv.lock`; установка только из PyPI
 и Python runtime из python-build-standalone через uv. Код моделей не загружается.

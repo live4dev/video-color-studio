@@ -1,6 +1,15 @@
 import numpy as np
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QImage, QMouseEvent, QPainter, QPen, QWheelEvent
+from PySide6.QtGui import (
+    QColor,
+    QColorSpace,
+    QImage,
+    QMouseEvent,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QWheelEvent,
+)
 from PySide6.QtWidgets import QWidget
 
 from .strings import _
@@ -12,12 +21,17 @@ def to_qimage(rgb: np.ndarray, alpha: np.ndarray | None = None) -> QImage:
         pixels = np.dstack((pixels, np.rint(np.clip(alpha, 0, 1) * 255).astype(np.uint8)))
     pixels = np.ascontiguousarray(pixels)
     fmt = QImage.Format.Format_RGBA8888 if alpha is not None else QImage.Format.Format_RGB888
-    return QImage(pixels.data, pixels.shape[1], pixels.shape[0], pixels.strides[0], fmt).copy()
+    result = QImage(pixels.data, pixels.shape[1], pixels.shape[0], pixels.strides[0], fmt).copy()
+    result.setColorSpace(QColorSpace(QColorSpace.NamedColorSpace.SRgb))
+    return result
 
 
 class CompareViewer(QWidget):
     zoom_changed = Signal(float)
     open_requested = Signal()
+    stroke_created = Signal(object)
+    waterline_changed = Signal(object)
+    person_box_changed = Signal(object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -34,6 +48,12 @@ class CompareViewer(QWidget):
         self.fitting = True
         self._dragging = ""
         self._last_position = QPointF()
+        self.overlay = QImage()
+        self.tool = "navigate"
+        self.brush_radius = 0.02
+        self.edits_enabled = True
+        self._stroke_points = []
+        self._hover_position = QPointF(-100, -100)
         self.setAccessibleName(_("Просмотр фотографии до и после обработки"))
 
     def set_images(
@@ -53,7 +73,39 @@ class CompareViewer(QWidget):
 
     def clear(self) -> None:
         self.before, self.after = QImage(), QImage()
+        self.overlay = QImage()
+        self._stroke_points = []
         self.update()
+
+    def set_tool(self, tool: str) -> None:
+        self.tool = tool
+        self._stroke_points = []
+        self._dragging = ""
+        self.update()
+
+    def set_mask_overlay(self, mask: np.ndarray | None, target: str = "skin") -> None:
+        if mask is None:
+            self.overlay = QImage()
+        else:
+            colors = {
+                "skin": [1, 0.57, 0.28],
+                "water": [0.15, 0.8, 1],
+                "person": [0.7, 0.55, 1],
+                "underwater": [0.2, 1, 0.6],
+            }
+            rgb = np.empty((*mask.shape, 3), np.float32)
+            rgb[:] = colors.get(target, colors["skin"])
+            self.overlay = to_qimage(rgb, np.clip(mask, 0, 1) * 0.42)
+        self.update()
+
+    def normalized_point(self, position: QPointF) -> tuple[float, float] | None:
+        rect = self.image_rect()
+        if self.before.isNull() or not rect.contains(position):
+            return None
+        return (
+            (position.x() - rect.left()) / rect.width(),
+            (position.y() - rect.top()) / rect.height(),
+        )
 
     def set_mode(self, mode: str) -> None:
         self.mode = mode
@@ -159,6 +211,29 @@ class CompareViewer(QWidget):
         else:
             painter.restore()
             self._badge(painter, rect, _("До") if self.mode == "before" else _("После"), left=True)
+        painter.save()
+        painter.setClipRect(rect)
+        if not self.overlay.isNull():
+            painter.drawImage(rect, self.overlay)
+        if self._stroke_points:
+            points = [
+                QPointF(rect.left() + x * rect.width(), rect.top() + y * rect.height())
+                for x, y in self._stroke_points
+            ]
+            painter.setPen(QPen(QColor("#eefaff"), 2))
+            if self.tool == "person_box" and len(points) > 1:
+                painter.drawRect(QRectF(points[0], points[-1]).normalized())
+            else:
+                path = QPainterPath(points[0])
+                for point in points[1:]:
+                    path.lineTo(point)
+                painter.drawPath(path)
+        if self.edits_enabled and self.tool not in ("navigate", "waterline", "person_box"):
+            radius = self.brush_radius * min(rect.width(), rect.height())
+            painter.setPen(QPen(QColor("#f2fbff"), 1))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawEllipse(self._hover_position, radius, radius)
+        painter.restore()
 
     def _badge(self, painter: QPainter, image_rect: QRectF, text: str, left: bool) -> None:
         x = (
@@ -178,7 +253,22 @@ class CompareViewer(QWidget):
             return
         rect = self.image_rect()
         boundary = rect.left() + rect.width() * self.split
-        if event.button() == Qt.MouseButton.LeftButton:
+        point = self.normalized_point(event.position())
+        if (
+            event.button() == Qt.MouseButton.LeftButton
+            and self.edits_enabled
+            and self.tool != "navigate"
+            and point is not None
+        ):
+            self._dragging = "paint"
+            self._stroke_points = [point]
+            self.update()
+            return
+        if event.button() == Qt.MouseButton.MiddleButton:
+            self._dragging = "pan"
+            self.fitting = False
+            self._last_position = event.position()
+        elif event.button() == Qt.MouseButton.LeftButton:
             if self.mode == "compare" and abs(event.position().x() - boundary) < 23:
                 self._dragging = "split"
             else:
@@ -191,7 +281,13 @@ class CompareViewer(QWidget):
         if self.before.isNull():
             return
         rect = self.image_rect()
-        if self._dragging == "split":
+        self._hover_position = event.position()
+        if self._dragging == "paint":
+            point = self.normalized_point(event.position())
+            if point is not None:
+                self._stroke_points.append(point)
+            self.update()
+        elif self._dragging == "split":
             self.split = float(
                 np.clip((event.position().x() - rect.left()) / max(1, rect.width()), 0, 1)
             )
@@ -203,11 +299,46 @@ class CompareViewer(QWidget):
         else:
             boundary = rect.left() + rect.width() * self.split
             near = self.mode == "compare" and abs(event.position().x() - boundary) < 23
-            self.setCursor(Qt.CursorShape.SplitHCursor if near else Qt.CursorShape.OpenHandCursor)
+            if self.tool != "navigate" and self.edits_enabled:
+                self.setCursor(Qt.CursorShape.CrossCursor)
+                self.update()
+            else:
+                self.setCursor(
+                    Qt.CursorShape.SplitHCursor if near else Qt.CursorShape.OpenHandCursor
+                )
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if self._dragging == "paint" and self._stroke_points:
+            point = self.normalized_point(event.position())
+            if point is not None:
+                self._stroke_points.append(point)
+            points = tuple(self._stroke_points)
+            if self.tool == "waterline":
+                self.waterline_changed.emit(points)
+            elif self.tool == "person_box":
+                first, last = points[0], points[-1]
+                box = (
+                    min(first[0], last[0]),
+                    min(first[1], last[1]),
+                    max(first[0], last[0]),
+                    max(first[1], last[1]),
+                )
+                if box[2] - box[0] > 0.01 and box[3] - box[1] > 0.01:
+                    self.person_box_changed.emit(box)
+            else:
+                target, operation = self.tool.split("_", 1)
+                self.stroke_created.emit(
+                    {
+                        "target": target,
+                        "operation": operation,
+                        "points": points,
+                        "radius": self.brush_radius,
+                    }
+                )
+            self._stroke_points = []
         self._dragging = ""
         self.setCursor(Qt.CursorShape.OpenHandCursor)
+        self.update()
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
         if self.before.isNull():
