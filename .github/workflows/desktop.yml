@@ -43,6 +43,14 @@ jobs:
       - name: Install and check the actual Windows archive
         if: runner.os == 'Windows'
         run: uv run --no-sync python tools/install_smoke.py --archive dist/Freedive_Color_Studio_Windows_x64_UNTESTED.zip
+      - name: Check packaged MCP and shared desktop project
+        if: runner.os == 'macOS'
+        shell: bash
+        run: >-
+          uv run --no-sync python tools/smoke_control.py
+          --output artifacts/ci-mcp-smoke
+          --adapter "dist/Freedive Color Studio.app/Contents/MacOS/freedive-color-mcp"
+          --application "dist/Freedive Color Studio.app/Contents/MacOS/Freedive Color Studio"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

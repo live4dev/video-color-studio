@@ -84,6 +84,65 @@ def validate_entry(entry: dict) -> None:
         raise ValueError("Source filename must be a single basename")
     if not entry.get("urls") or any(urlparse(u).scheme != "https" for u in entry["urls"]):
         raise ValueError("Source downloads must use HTTPS")
+    timeout = entry.get("download_timeout", 90)
+    if type(timeout) is not int or not 10 <= timeout <= 300:
+        raise ValueError("Source download timeout must be 10..300 seconds")
+
+
+def merge_mcp_sources(lock: dict, inventory: dict, windows_bundle: Path | None = None) -> dict:
+    """Add the separately pinned SDK graph without weakening existing native gates."""
+    path = RECORDS / "mcp-sources-lock.json"
+    if not path.is_file():
+        raise RuntimeError("MCP source lock is missing; no complete source archive can be claimed")
+    sdk = json.loads(path.read_text(encoding="utf-8"))
+    expected = sdk["required_versions"]
+    if windows_bundle:
+        versions = {
+            row["package"].lower().replace("_", "-"): row["version"] for row in inventory["wheels"]
+        }
+    else:
+        versions = {}
+        for name in expected:
+            try:
+                versions[name] = importlib.metadata.version(name)
+            except importlib.metadata.PackageNotFoundError as exc:
+                raise RuntimeError(f"Pinned MCP dependency is missing: {name}") from exc
+    for name, version in expected.items():
+        if versions.get(name) != version:
+            raise RuntimeError(f"MCP source lock mismatch: {name} requires {version}")
+    if windows_bundle and versions.get("pywin32") != sdk["windows_pywin32_version"]:
+        raise RuntimeError("Windows pywin32 source lock mismatch")
+    expected_ssl = sdk["openssl_version"]
+    if windows_bundle:
+        native = windows_bundle / "runtime/Lib/site-packages/cryptography/hazmat/bindings/_rust.pyd"
+        ssl_versions = {
+            match.decode("ascii")
+            for match in re.findall(
+                rb"OpenSSL ([0-9]+\.[0-9]+\.[0-9]+) [0-9]{1,2} [A-Za-z]{3} [0-9]{4}",
+                native.read_bytes(),
+            )
+        }
+        if ssl_versions != {expected_ssl}:
+            raise RuntimeError("Windows cryptography OpenSSL source version is unverified")
+    else:
+        from cryptography.hazmat.bindings.openssl.binding import Binding
+
+        binding = Binding()
+        version_text = binding.ffi.string(binding.lib.OpenSSL_version(0)).decode("ascii")
+        if not version_text.startswith(f"OpenSSL {expected_ssl} "):
+            raise RuntimeError("Installed cryptography OpenSSL source version changed")
+    merged = {**lock, "provenance": {**lock["provenance"]}}
+    merged["provenance"]["mcp"] = {
+        **sdk["provenance"],
+        "source_lock_sha256": sha256(path),
+        "required_versions": expected,
+        "openssl_version": expected_ssl,
+    }
+    for key in ("sources", "source_access", "extra_notices"):
+        merged[key] = [*lock.get(key, []), *sdk.get(key, [])]
+    for entry in sdk["sources"]:
+        validate_entry(entry)
+    return merged
 
 
 def acquire(entry: dict, work: Path, *, offline: bool = False) -> dict:
@@ -111,7 +170,7 @@ def acquire(entry: dict, work: Path, *, offline: bool = False) -> dict:
                 "--connect-timeout",
                 "10",
                 "--max-time",
-                "90",
+                str(entry.get("download_timeout", 90)),
                 "--speed-time",
                 "25",
                 "--speed-limit",
@@ -391,6 +450,7 @@ def collect(
     inventory = windows_inventory(windows_bundle) if windows_bundle else native_inventory()
     if not windows_bundle:
         inventory["qt_bundle"] = audit_qt(bundle)
+    lock = merge_mcp_sources(lock, inventory, windows_bundle)
     entries = lock["sources"][:]
     shared_archives = ROOT / "build/media-sources/archives"
     for entry in entries:

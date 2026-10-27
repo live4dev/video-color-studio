@@ -7,6 +7,10 @@ import sys
 import sysconfig
 from pathlib import Path
 
+from packaging.markers import default_environment
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
+
 DISTRIBUTIONS = (
     "numpy",
     "opencv-python-headless",
@@ -16,7 +20,32 @@ DISTRIBUTIONS = (
     "tifffile",
     "av",
     "pyinstaller",
+    "mcp",
 )
+
+
+def runtime_distributions() -> tuple[str, ...]:
+    """Include SDK transitives and selected extras, using the installed runtime."""
+    pending = [(name, frozenset()) for name in DISTRIBUTIONS]
+    visited = set()
+    names = set()
+    environment = default_environment()
+    while pending:
+        name, extras = pending.pop()
+        key = (canonicalize_name(name), extras)
+        if key in visited:
+            continue
+        visited.add(key)
+        distribution = importlib.metadata.distribution(name)
+        names.add(distribution.metadata["Name"])
+        for specification in distribution.requires or ():
+            requirement = Requirement(specification)
+            if requirement.marker is None or any(
+                requirement.marker.evaluate({**environment, "extra": extra})
+                for extra in (extras or {""})
+            ):
+                pending.append((requirement.name, frozenset(requirement.extras)))
+    return tuple(sorted(names, key=str.casefold))
 
 
 def collect(destination: Path) -> None:
@@ -24,7 +53,7 @@ def collect(destination: Path) -> None:
         shutil.rmtree(destination)
     destination.mkdir(parents=True, exist_ok=True)
     manifest = {"python": sys.version, "distributions": []}
-    for name in DISTRIBUTIONS:
+    for name in runtime_distributions():
         distribution = importlib.metadata.distribution(name)
         notices = []
         for entry in distribution.files or ():

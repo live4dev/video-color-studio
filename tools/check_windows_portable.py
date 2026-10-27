@@ -5,16 +5,164 @@ import argparse
 import json
 import os
 import platform
+import queue
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 from pathlib import Path
 
 try:
     from build_windows_portable import MANIFEST, ROOT, file_hashes, native_audit, sha256
 except ImportError:
     from tools.build_windows_portable import MANIFEST, ROOT, file_hashes, native_audit, sha256
+
+
+def check_mcp_stdio(command: list[str], environment: dict, working_directory: Path) -> dict:
+    """Packaged transport acceptance using host stdlib only; no desktop connection."""
+    with tempfile.TemporaryDirectory(prefix="freedive-mcp-stdio-") as temporary:
+        connection = Path(temporary) / "private connection"
+        environment = {**environment, "FREEDIVE_COLOR_CONTROL_DIR": str(connection)}
+        process = subprocess.Popen(
+            command,
+            cwd=working_directory,
+            env=environment,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        received = queue.Queue(maxsize=64)
+        diagnostics = bytearray()
+        wire_lines = []
+
+        def read_stdout():
+            while True:
+                line = process.stdout.readline(1_048_578)
+                received.put(line)
+                if not line:
+                    break
+
+        def read_stderr():
+            while chunk := process.stderr.read(4096):
+                if len(diagnostics) < 32768:
+                    diagnostics.extend(chunk[: 32768 - len(diagnostics)])
+
+        reader = threading.Thread(target=read_stdout, daemon=True)
+        errors = threading.Thread(target=read_stderr, daemon=True)
+        reader.start()
+        errors.start()
+
+        def send(value):
+            process.stdin.write((json.dumps(value, ensure_ascii=False) + "\n").encode("utf-8"))
+            process.stdin.flush()
+
+        def parse(line):
+            if not line or len(line) > 1_048_577 or not line.endswith(b"\n"):
+                raise ValueError("Packaged MCP stdout has an incomplete/oversized message or EOF")
+            value = json.loads(line.decode("utf-8", errors="strict"))
+            if not isinstance(value, dict) or value.get("jsonrpc") != "2.0":
+                raise ValueError("Packaged MCP stdout contains non-protocol output")
+            wire_lines.append({"id": value.get("id"), "bytes": len(line)})
+            return value
+
+        def response(identifier):
+            deadline = time.monotonic() + 30
+            while time.monotonic() < deadline:
+                try:
+                    value = parse(received.get(timeout=max(0.001, deadline - time.monotonic())))
+                except queue.Empty:
+                    break
+                if value.get("id") == identifier:
+                    if "error" in value:
+                        raise ValueError("Packaged MCP returned a protocol error")
+                    return value["result"]
+            raise TimeoutError("Packaged MCP stdio response timed out")
+
+        try:
+            send(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2025-11-25",
+                        "capabilities": {},
+                        "clientInfo": {"name": "Freedive portable check", "version": "1"},
+                    },
+                }
+            )
+            initialized = response(1)
+            send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+            send({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
+            tools = response(2)["tools"]
+            expected = {
+                "connect_session",
+                "get_capabilities",
+                "get_state",
+                "list_media",
+                "import_media",
+                "select_media",
+                "set_grade",
+                "set_reference",
+                "render_preview",
+                "export_media",
+                "get_job",
+                "cancel_job",
+                "save_project",
+                "load_project",
+                "show_window",
+            }
+            if {tool["name"] for tool in tools} != expected:
+                raise ValueError("The packaged MCP adapter does not list all 15 tools")
+            send(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "tools/call",
+                    "params": {"name": "get_capabilities", "arguments": {}},
+                }
+            )
+            capability_result = response(3)
+            caps = capability_result.get("structuredContent", {})
+            if (
+                capability_result.get("isError")
+                or caps.get("api_version") != 1
+                or caps.get("privacy", {}).get("media_contents_in_responses") is not False
+            ):
+                raise ValueError("The packaged capabilities/privacy contract failed")
+            if connection.exists():
+                raise ValueError("Initialization/list/capabilities unexpectedly started the app")
+            process.stdin.close()
+            if process.wait(timeout=15) != 0:
+                raise ValueError("The packaged MCP adapter did not exit cleanly after stdin EOF")
+            reader.join(timeout=2)
+            errors.join(timeout=2)
+            while not received.empty():
+                line = received.get_nowait()
+                if line:
+                    parse(line)
+            return {
+                "passed": True,
+                "tools": sorted(expected),
+                "tool_count": len(tools),
+                "protocol_version": initialized["protocolVersion"],
+                "api_version": caps["api_version"],
+                "stdout_jsonrpc_only": True,
+                "desktop_not_started": True,
+                "messages": wire_lines,
+                "stderr": diagnostics.decode("utf-8", errors="replace"),
+            }
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=10)
+            reader.join(timeout=2)
+            errors.join(timeout=2)
+            for stream in (process.stdin, process.stdout, process.stderr):
+                if stream is not None and not stream.closed:
+                    stream.close()
 
 
 def check(stage: Path, output: Path, *, static_only=False, offscreen=False) -> dict:
@@ -58,6 +206,7 @@ def check(stage: Path, output: Path, *, static_only=False, offscreen=False) -> d
         environment["PATH"] = os.pathsep.join((str(windows / "System32"), str(windows)))
         if offscreen:
             environment["QT_QPA_PLATFORM"] = "offscreen"
+        mcp_check = check_mcp_stdio([str(stage / "freedive-color-mcp.exe")], environment, stage)
         with tempfile.TemporaryDirectory(prefix="freedive-доказательство ") as temporary:
             diagnose_path = Path(temporary) / "проверка runtime.json"
             subprocess.run(
@@ -72,6 +221,12 @@ def check(stage: Path, output: Path, *, static_only=False, offscreen=False) -> d
                 timeout=60,
             )
             diagnose = json.loads(diagnose_path.read_text(encoding="utf-8"))
+            if (
+                diagnose.get("mcp_version") != "2.3.0"
+                or diagnose.get("local_transport", {}).get("api_version") != 1
+                or len(diagnose.get("windows_control_modules", [])) != 7
+            ):
+                raise ValueError("Packaged QtNetwork/pywin32/MCP dependencies are unavailable")
             photo = Path(temporary) / "подводный кадр с пробелами.jpg"
             photo_output = Path(temporary) / "результат 16 бит.png"
             shutil.copyfile(ROOT / "tests/fixtures/freediver_moalboal.jpg", photo)
@@ -139,6 +294,7 @@ def check(stage: Path, output: Path, *, static_only=False, offscreen=False) -> d
                 "clean_opencv_verified": True,
                 "unicode_cli_photo16_verified": True,
                 "diagnostics": diagnose,
+                "packaged_mcp_stdio": mcp_check,
                 "photo_video_gui_acceptance": smoke,
             }
         )

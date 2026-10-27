@@ -123,3 +123,53 @@ uv run --no-sync python tools/smoke_bundle.py
 требуют доступа к официальным источникам зависимостей; готовое приложение работает
 офлайн. Ограничения масок, HDR, цветового монитора и статичных ручных мазков
 перечислены в README.md и DECISIONS.md.
+
+## MCP и общее состояние — 0.4.0
+
+Полный локальный прогон: **406 passed, 0 failed, 20.72 с**,
+`artifacts/mcp-final-tests.xml`. Ruff проверил 104 Python-файла. Тесты покрывают:
+
+- Настоящий SDK 2.3.0 stdio: 15 инструментов, строгие диапазоны/типы/unknown fields,
+  ленивый запуск, единые ошибки и запрет media/binary/oversized ответов. Python
+  print и native stdout не попадают в поток JSON-RPC.
+- Настоящий QLocalSocket: фрагменты UTF-8, несколько сообщений за чтение, лимиты
+  запроса/ответа, неверный токен/API, singleton/stale process, переподключение,
+  скрытие окна и неблокирующее завершение очереди.
+- Контроллер и GUI: атомарные ревизии, общий/индивидуальный пресет, сохранение
+  масок/локальных поправок, очередь и отмена серии с сохранением готового файла,
+  неизменяемые snapshots, stale preview/reference и interrupted-журнал.
+- Регрессии смены файла/настроек во время GUI-экспорта, точные target IDs серии,
+  отделение старого video plan/proxy и синхронизация времени воспроизведения.
+- Совместимый `.fcsproj` схемы 1 без служебных MCP UUID, новый session/media IDs
+  при загрузке, read-only summaries больших масок и постраничное чтение.
+
+`tools/smoke_control.py` дополнительно общается с настоящим приложением через SDK
+и stdio, импортирует три настоящих кодированных тестовых видео, делает групповую
+и индивидуальную правку, proxy и полный экспорт. Отключает адаптер во время
+running, подключает новый и проверяет прежний PID/session. После запуска меняет
+настройку, сверяет неизменяемый экспортный рецепт, все PTS/аудиопакеты и SHA
+исходников. Не передаёт кадры или звук модели и не заявляет визуальную приёмку.
+
+Source-проверка: `artifacts/mcp-source-smoke/result.json`; frozen-проверки:
+`artifacts/mcp-bundle-smoke/result.json` и финальная проверка распакованного ZIP
+`artifacts/mcp-installed-smoke/result.json`. Прогон на текущем Mac запрещает
+внешние IP-подключения, оставляя локальный Unix-канал; child PATH не содержит
+Python/FFmpeg разработчика. Это проверка изоляции, а не удаление Python с хоста
+или проверка чистой macOS 13.
+
+```sh
+uv run --no-sync python tools/smoke_control.py --output artifacts/new-mcp-source-test
+uv run --no-sync python tools/smoke_control.py \
+  --output artifacts/new-mcp-bundle-test \
+  --adapter "dist/Freedive Color Studio.app/Contents/MacOS/freedive-color-mcp" \
+  --application "dist/Freedive Color Studio.app/Contents/MacOS/Freedive Color Studio"
+```
+
+Каждый прогон требует новую папку. Он использует отдельный приватный реестр и
+завершает только свой тестовый процесс после проверки; существующий проект не
+затрагивается. В Windows checker добавлен независимый stdlib stdio handshake
+готового EXE и проверка QtNetwork/COM. Эти Windows-проверки подготовлены, но в
+этой macOS-сессии Windows EXE не исполнялся. Windows x64, Intel Mac и чистая
+macOS 13 остаются явно непроверенными платформами. Нативная Qt-работа текущего
+Mac подтверждена; ошибка `neon` из ограниченного диагностического запуска её
+не воспроизводит при проверенном нативном запуске.

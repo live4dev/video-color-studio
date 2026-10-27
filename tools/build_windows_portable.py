@@ -61,6 +61,7 @@ SYSTEM_DLLS = set(
         "authz",
         "avicap32",
         "bcrypt",
+        "bcryptprimitives",
         "comdlg32",
         "crypt32",
         "d2d1",
@@ -80,12 +81,16 @@ SYSTEM_DLLS = set(
         "mpr",
         "msvcrt",
         "ncrypt",
+        "ntdll",
+        "ntdsapi",
         "netapi32",
         "odbc32",
         "ole32",
+        "oleacc",
         "oleaut32",
         "opengl32",
         "propsys",
+        "powrprof",
         "psapi",
         "rpcrt4",
         "secur32",
@@ -94,6 +99,7 @@ SYSTEM_DLLS = set(
         "shlwapi",
         "uiautomationcore",
         "user32",
+        "urlmon",
         "userenv",
         "uxtheme",
         "version",
@@ -104,7 +110,17 @@ SYSTEM_DLLS = set(
         "wtsapi32",
     ]
 )
-QT_ROOTS = {"QtCore.pyd", "QtGui.pyd", "QtWidgets.pyd"}
+QT_ROOTS = {"QtCore.pyd", "QtGui.pyd", "QtWidgets.pyd", "QtNetwork.pyd"}
+PYWIN32_ROOTS = {
+    "win32api.pyd",
+    "win32job.pyd",
+    "win32process.pyd",
+    "win32security.pyd",
+    "_win32sysloader.pyd",
+    "shell.pyd",
+    "pythoncom313.dll",
+    "pywintypes313.dll",
+}
 NATIVE_SUFFIXES = {".dll", ".pyd", ".exe"}
 MANIFEST = "BUILD-MANIFEST.json"
 
@@ -173,6 +189,7 @@ def locked_wheels(project: Path = ROOT) -> list[dict]:
     supported += list(compatible_tags((3, 13), interpreter="cp313", platforms=["win_amd64"]))
     priorities = {tag: index for index, tag in enumerate(supported)}
     selected, pending = {}, [Requirement(text) for text in metadata["project"]["dependencies"]]
+    processed_dependencies, processed_extras = set(), {}
     while pending:
         requirement = pending.pop()
         if requirement.marker and not requirement.marker.evaluate(environment):
@@ -184,10 +201,8 @@ def locked_wheels(project: Path = ROOT) -> list[dict]:
         if len(matches) != 1:
             raise ValueError(f"Expected one locked Windows version for {name}")
         package = matches[0]
-        if name in selected:
-            if selected[name]["version"] != package["version"]:
-                raise ValueError(f"Conflicting locked versions for {name}")
-            continue
+        if name in selected and selected[name]["version"] != package["version"]:
+            raise ValueError(f"Conflicting locked versions for {name}")
         candidates = []
         for wheel in package.get("wheels", []):
             filename = Path(urlparse(wheel["url"]).path).name
@@ -205,12 +220,22 @@ def locked_wheels(project: Path = ROOT) -> list[dict]:
             "url": wheel["url"],
             "sha256": wheel["hash"].removeprefix("sha256:"),
         }
-        for dependency in package.get("dependencies", []):
+        dependencies = []
+        if name not in processed_dependencies:
+            dependencies.extend(package.get("dependencies", []))
+            processed_dependencies.add(name)
+        seen_extras = processed_extras.setdefault(name, set())
+        for extra in requirement.extras - seen_extras:
+            dependencies.extend(package.get("optional-dependencies", {}).get(extra, []))
+            seen_extras.add(extra)
+        for dependency in dependencies:
             if dependency.get("marker") and not Marker(dependency["marker"]).evaluate(environment):
                 continue
+            extras = dependency.get("extra", [])
             pending.append(
                 Requirement(
                     dependency["name"]
+                    + ("[" + ",".join(extras) + "]" if extras else "")
                     + ("==" + dependency["version"] if dependency.get("version") else "")
                 )
             )
@@ -286,6 +311,13 @@ def native_audit(stage: Path, *, trim_qt: bool = False) -> dict:
         name = row["path"]
         if Path(name).name.lower() in unused_video_plugins:
             continue
+        if any(
+            part in name.lower()
+            for part in ("/win32/", "/win32comext/", "/pythonwin/", "/pywin32_system32/")
+        ):
+            if Path(name).name.lower() in PYWIN32_ROOTS:
+                pending.append(row)
+            continue
         if "/PySide6/" not in name or (
             Path(name).name in QT_ROOTS
             or any(
@@ -354,9 +386,10 @@ def compiler(cache: Path, supplied: Path | None, *, offline: bool) -> Path:
 def compile_launchers(stage: Path, zig: Path, cache: Path) -> list[dict]:
     environment = {**os.environ, "ZIG_GLOBAL_CACHE_DIR": str(cache / "zig-cache")}
     results = []
-    for gui, name in (
-        (True, "Freedive Color Studio.exe"),
-        (False, "Freedive Color Studio CLI.exe"),
+    for gui, mcp, name in (
+        (True, False, "Freedive Color Studio.exe"),
+        (False, False, "Freedive Color Studio CLI.exe"),
+        (False, True, "freedive-color-mcp.exe"),
     ):
         destination = stage / name
         arguments = [
@@ -369,6 +402,7 @@ def compile_launchers(stage: Path, zig: Path, cache: Path) -> list[dict]:
             "-s",
             "-municode",
             f"-DFREEDIVE_GUI={int(gui)}",
+            f"-DFREEDIVE_MCP={int(mcp)}",
             "-Wl,--subsystem," + ("windows" if gui else "console"),
             str(ROOT / "packaging/windows/portable_launcher.c"),
             "-luser32",
@@ -495,6 +529,7 @@ def prepare(
             "Extract the entire folder, then open Freedive Color Studio.exe.\n"
             "Python, administrator privileges, API keys and internet are not required.\n"
             "CLI: Freedive Color Studio CLI.exe --help\n"
+            "MCP stdio adapter: freedive-color-mcp.exe (console; no GUI on initialization)\n"
             "License notices are in licenses/. Corresponding sources accompany this ZIP.\n",
             encoding="utf-8",
         )

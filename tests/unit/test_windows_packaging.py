@@ -126,8 +126,9 @@ def test_unknown_required_dll_and_unexpected_cv_plugin_import_fail_closed(win, t
 
 def test_real_project_resolves_windows_profile_and_stable_abi_wheels(win):
     wheels = win.locked_wheels()
-    assert len(wheels) == 7
+    assert len(wheels) == len({entry["package"] for entry in wheels})
     by_name = {entry["package"]: entry for entry in wheels}
+    assert {"mcp", "mcp-types", "pywin32", "cryptography", "cffi"} <= by_name.keys()
     assert by_name["av"]["version"] == "16.1.0"
     assert "cp313-cp313-win_amd64" in by_name["av"]["filename"]
     assert "cp39-abi3-win_amd64" in by_name["pyside6-essentials"]["filename"]
@@ -256,3 +257,58 @@ def test_packaged_gui_startup_failure_returns_without_dialog_in_both_smoke_modes
 
     monkeypatch.setattr(bootstrap, "configure", failure)
     assert bootstrap.main() == 1
+
+
+def test_qtnetwork_and_required_pywin32_closure_are_kept(win, tmp_path):
+    files = {
+        "PySide6/QtNetwork.pyd": small_pe(imported="Qt6Network.dll"),
+        "PySide6/Qt6Network.dll": small_pe(),
+        "win32/win32api.pyd": small_pe(imported="pywintypes313.dll"),
+        "win32/win32job.pyd": small_pe(imported="pywintypes313.dll"),
+        "win32/_win32sysloader.pyd": small_pe(),
+        "win32comext/shell/shell.pyd": small_pe(imported="pythoncom313.dll"),
+        "pywin32_system32/pythoncom313.dll": small_pe(imported="pywintypes313.dll"),
+        "pywin32_system32/pywintypes313.dll": small_pe(),
+        "win32/win32evtlog.pyd": small_pe(imported="unused-event-feature.dll"),
+    }
+    for name, data in files.items():
+        file = tmp_path / "runtime/Lib/site-packages" / name
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_bytes(data)
+    report = win.native_audit(tmp_path, trim_qt=True)
+    assert len(report["native_files"]) == 8
+    assert len(report["omitted_unused_binaries"]) == 1
+    assert not list(tmp_path.rglob("win32evtlog.pyd"))
+
+
+def test_mcp_bootstrap_uses_stdio_server_without_desktop_import(win, monkeypatch):
+    import importlib.util
+    import sys
+    from types import SimpleNamespace
+
+    spec = importlib.util.spec_from_file_location(
+        "portable_bootstrap_mcp_test", ROOT / "packaging/windows/portable_bootstrap.py"
+    )
+    bootstrap = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bootstrap)
+    calls = []
+    monkeypatch.setattr(bootstrap, "configure", lambda: calls.append("private-runtime"))
+    monkeypatch.setattr(bootstrap.sys, "argv", ["app", "--launcher-mcp"])
+    monkeypatch.setitem(
+        sys.modules,
+        "freedive_color.control.mcp_server",
+        SimpleNamespace(main=lambda: calls.append("stdio")),
+    )
+    assert bootstrap.main() == 0
+    assert calls == ["private-runtime", "stdio"]
+
+
+def test_native_checker_rejects_non_protocol_stdio_output(win, tmp_path):
+    import os
+    import sys
+
+    checker = importlib.import_module("tools.check_windows_portable")
+    broken = tmp_path / "wrong-stdout.py"
+    broken.write_text("import time;print('diagnostic on stdout',flush=True);time.sleep(30)")
+    with pytest.raises((ValueError, json.JSONDecodeError)):
+        checker.check_mcp_stdio([sys.executable, str(broken)], dict(os.environ), tmp_path)

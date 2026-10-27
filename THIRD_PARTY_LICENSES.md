@@ -72,3 +72,24 @@ QA-результатам; тестовый ролик не входит в пр
 MP4 с изменением света созданы из public-domain фотографии и синтетического звука.
 Сборки MVP не имеют Developer ID/Authenticode и notarization; автоматическая
 ad-hoc подпись Mach-O при freeze не равнозначна подписи издателя.
+
+## Локальная MCP-интеграция 0.4
+
+Официальные `mcp` и `mcp-types` 2.3.0 — MIT. Версии всей зависимости SDK
+закреплены в uv.lock; SDK используется только со stdio. Наличие HTTP/OAuth-модулей
+в пакете не означает запуска HTTP-сервера или обращения к облаку. PySide6.QtNetwork
+предоставляет локальные сокеты; его условия и исходники относятся к QtBase 6.8.3.
+
+Дополнительные компоненты включают Pydantic/pydantic-core (MIT), rpds-py (MIT),
+cryptography (Apache-2.0 OR BSD-3-Clause), cffi (MIT), httpx2/httpcore2 (BSD-3-Clause),
+AnyIO, JSON Schema, Starlette/Uvicorn и связанные библиотеки. На Windows требуется
+pywin32 312 (PSF/BSD-совместимые условия его точного producer source). Полные
+пакетные notices собираются по фактически установленному графу, включая extras.
+
+Точные 28 Python sdists, 140 SHA-проверенных Cargo-архивов и OpenSSL 4.0.3
+зафиксированы в `packaging/media/mcp-sources-lock.json`. Версия OpenSSL сверяется
+с фактическими macOS FFI и Windows PE/SBOM; Mac native SDK-модули имеют minimum OS 11.
+Точная pywin32 source-access запись отдельно отмечена и не выдаётся за включённый
+архив. Этот lock дополняет прежние обязательные Qt/FFmpeg/OpenCV source gates,
+не заменяя и не ослабляя их. Сводные источники и полные notices обновляются вместе
+с standalone-дистрибутивами.

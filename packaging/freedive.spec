@@ -14,7 +14,7 @@ analysis = Analysis(
     pathex=[str(root / "src")],
     binaries=[], datas=data, hiddenimports=[],
     excludes=["tkinter", "matplotlib", "pytest", "PySide6.QtWebEngineCore", "PySide6.QtQml",
-              "PySide6.QtQuick", "PySide6.QtNetwork", "PySide6.QtTest"],
+              "PySide6.QtQuick", "PySide6.QtTest"],
     noarchive=False,
 )
 pyz = PYZ(analysis.pure)
@@ -23,7 +23,12 @@ executable = EXE(
     name="Freedive Color Studio", debug=False, strip=False, upx=False,
     console=False, argv_emulation=False,
 )
-collected = COLLECT(executable, analysis.binaries, analysis.datas,
+mcp_executable = EXE(
+    pyz, analysis.scripts, [], exclude_binaries=True,
+    name="freedive-color-mcp", debug=False, strip=False, upx=False,
+    console=True, argv_emulation=False,
+)
+collected = COLLECT(executable, mcp_executable, analysis.binaries, analysis.datas,
                     strip=False, upx=False, name="Freedive Color Studio")
 if sys.platform == "darwin":
     bundle = BUNDLE(

@@ -18,12 +18,21 @@ def configure() -> None:
     if not sys.flags.isolated:
         raise RuntimeError("The application runtime must start in isolated mode")
     sys._MEIPASS = str(ROOT)
+    os.environ["FREEDIVE_COLOR_PORTABLE_ROOT"] = str(ROOT)
+    os.environ["FREEDIVE_COLOR_APP"] = str(ROOT / "Freedive Color Studio.exe")
+    # The embeddable interpreter deliberately disables .pth execution. Reproduce
+    # only pywin32's required local paths; never run user/site startup hooks.
+    for directory in (SITE / "win32", SITE / "win32" / "lib", SITE / "Pythonwin"):
+        if directory.is_dir() and str(directory) not in sys.path:
+            sys.path.append(str(directory))
     for directory in [
         RUNTIME,
         SITE / "PySide6",
         SITE / "shiboken6",
         SITE / "cv2",
         SITE / "PIL",
+        SITE / "pywin32_system32",
+        SITE / "win32",
         *sorted(SITE.glob("*.libs")),
     ]:
         if directory.is_dir():
@@ -33,11 +42,21 @@ def configure() -> None:
 
 
 def diagnose(arguments: list[str]) -> int:
+    import importlib.metadata
+
     import av
     import cv2
     import numpy
     import PIL
+    import pythoncom
+    import pywintypes
+    import win32api
+    import win32job
+    import win32process
+    import win32security
     from PySide6.QtCore import qVersion
+    from PySide6.QtNetwork import QLocalServer, QLocalSocket
+    from win32com.shell import shell
 
     sample = numpy.full((32, 48, 3), (35, 95, 145), dtype=numpy.uint8)
     codecs = {}
@@ -68,6 +87,24 @@ def diagnose(arguments: list[str]) -> int:
         },
         "ffmpeg_libraries": {k: list(v) for k, v in av.library_versions.items()},
         "network_required": False,
+        "mcp_version": importlib.metadata.version("mcp"),
+        "local_transport": {
+            "api_version": 1,
+            "server": QLocalServer.__name__,
+            "socket": QLocalSocket.__name__,
+        },
+        "windows_control_modules": [
+            module.__name__
+            for module in (
+                pythoncom,
+                pywintypes,
+                win32api,
+                win32job,
+                win32process,
+                win32security,
+                shell,
+            )
+        ],
         "opencv_build_information": cv2.getBuildInformation(),
         "image_codec_checks": codecs,
         "optical_flow_finite": True,
@@ -89,11 +126,21 @@ def diagnose(arguments: list[str]) -> int:
 
 def main() -> int:
     gui = len(sys.argv) > 1 and sys.argv[1] == "--launcher-gui"
-    if len(sys.argv) < 2 or sys.argv[1] not in ("--launcher-gui", "--launcher-cli"):
+    if len(sys.argv) < 2 or sys.argv[1] not in (
+        "--launcher-gui",
+        "--launcher-cli",
+        "--launcher-mcp",
+    ):
         raise RuntimeError("The native launcher mode is missing")
+    mcp = sys.argv[1] == "--launcher-mcp"
     del sys.argv[1]
     try:
         configure()
+        if mcp:
+            from freedive_color.control.mcp_server import main as mcp_main
+
+            mcp_main()
+            return 0
         if "--diagnose-portable" in sys.argv:
             return diagnose(sys.argv[1:])
         from freedive_color.__main__ import main as application_main
