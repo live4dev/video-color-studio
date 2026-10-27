@@ -188,7 +188,7 @@ class MainWindow(QMainWindow):
         self.apply_group_button = QPushButton(_("Настройки → выбранным"))
         self.apply_group_button.clicked.connect(self.apply_to_selected)
         library_layout.addWidget(self.apply_group_button)
-        note = QLabel(_("JPEG, PNG, TIFF\nОбработка на этом компьютере"))
+        note = QLabel(_("Фото и видео SDR\nОбработка на этом компьютере"))
         note.setObjectName("metadata")
         note.setWordWrap(True)
         library_layout.addWidget(note)
@@ -256,6 +256,7 @@ class MainWindow(QMainWindow):
         self.video_duration_spin = QDoubleSpinBox()
         self.video_duration_spin.setRange(0.1, 15)
         self.video_duration_spin.setValue(10)
+        self.video_start_spin.valueChanged.connect(self._preview_range_changed)
         self.video_duration_spin.setSuffix(" с")
         video_row.addWidget(QLabel(_("Длина")))
         video_row.addWidget(self.video_duration_spin)
@@ -1511,7 +1512,14 @@ class MainWindow(QMainWindow):
         del blocker
         self.video_start_spin.setRange(0, max(0, duration - 0.1))
         self.video_duration_spin.setMaximum(min(15, duration))
+        self._preview_range_changed()
         self.video_time_label.setText(f"{self.video_frame_seconds:.2f} / {duration:.2f} с")
+
+    def _preview_range_changed(self) -> None:
+        if self.video_info is not None:
+            self.video_duration_spin.setMaximum(
+                min(15.0, max(0.1, float(self.video_info.duration) - self.video_start_spin.value()))
+            )
 
     def seek_video(self, seconds: float) -> None:
         if self.video_info is None or self._export_job is not None:

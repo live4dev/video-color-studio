@@ -209,6 +209,25 @@ def test_missing_or_modified_model_is_explicit(tmp_path):
         PPHumanSegmenter(fake)
 
 
+def test_unicode_model_path_uses_verified_memory_buffer(tmp_path, monkeypatch):
+    folder = tmp_path / "Сборка и модель"
+    folder.mkdir()
+    model = folder / MODEL_PATH.name
+    model.write_bytes(MODEL_PATH.read_bytes())
+    original = cv2.dnn.readNetFromONNX
+    observed = []
+
+    def load(buffer):
+        assert isinstance(buffer, np.ndarray) and buffer.dtype == np.uint8
+        observed.append(buffer.size)
+        return original(buffer)
+
+    monkeypatch.setattr(cv2.dnn, "readNetFromONNX", load)
+    segmenter = PPHumanSegmenter(model)
+    assert not segmenter.net.empty()
+    assert observed == [model.stat().st_size]
+
+
 def test_real_photo_semantic_masks_are_local_and_do_not_select_black_gear():
     assert MODEL_PATH.is_file()
     source = Path(__file__).parents[1] / "fixtures" / "freediver_moalboal.jpg"

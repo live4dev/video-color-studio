@@ -161,11 +161,13 @@ class PPHumanSegmenter:
     def __init__(self, model_path: Path = MODEL_PATH):
         if not model_path.is_file():
             raise StudioError("Локальная модель человека отсутствует. Используйте рамку или кисть.")
-        digest = hashlib.sha256(model_path.read_bytes()).hexdigest()
+        model_bytes = model_path.read_bytes()
+        digest = hashlib.sha256(model_bytes).hexdigest()
         if digest != MODEL_SHA256:
             raise StudioError("Контрольная сумма локальной модели не совпала. Используйте кисть.")
         try:
-            self.net = cv2.dnn.readNetFromONNX(str(model_path))
+            # Python handles Unicode filenames consistently on Windows; OpenCV receives bytes.
+            self.net = cv2.dnn.readNetFromONNX(np.frombuffer(model_bytes, dtype=np.uint8))
             self.net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
             self.net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
         except cv2.error as exc:
