@@ -402,10 +402,11 @@ def collect_wheel_notices(stage: Path) -> None:
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source, target)
     shutil.copyfile(stage / "runtime/LICENSE.txt", destination / "PYTHON_LICENSE.txt")
-    for name in ("LICENSE", "THIRD_PARTY_NOTICES.md", "README.md"):
+    for name in ("LICENSE", "THIRD_PARTY_LICENSES.md", "README.md"):
         path = ROOT / name
         if path.is_file():
             shutil.copyfile(path, stage / name)
+    shutil.copyfile(ROOT / "packaging/media/NOTICE.md", destination / "NOTICE.md")
 
 
 def install_native_opencv(stage: Path, manifest_path: Path) -> dict:

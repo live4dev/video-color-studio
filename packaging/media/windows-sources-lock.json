@@ -636,7 +636,7 @@
       "urls": [
         "https://aomedia.googlesource.com/aom/+archive/refs/tags/v3.14.1.tar.gz"
       ],
-      "license": "BSD-3-Clause",
+      "license": "BSD-2-Clause",
       "platforms": [
         "macos-arm64",
         "windows-x64"
@@ -684,7 +684,7 @@
       "urls": [
         "https://www.x.org/pub/individual/lib/libXau-1.0.12.tar.gz"
       ],
-      "license": "MIT",
+      "license": "X11",
       "platforms": [
         "macos-arm64"
       ],
@@ -714,7 +714,7 @@
       "urls": [
         "https://www.x.org/pub/individual/proto/xorgproto-2025.1.tar.gz"
       ],
-      "license": "MIT",
+      "license": "MIT/X11/HPND-style licences; see upstream COPYING-* for exact per-file notices",
       "platforms": [
         "macos-arm64"
       ],
@@ -775,6 +775,24 @@
       "path": "packaging/media/WINPTHREAD-COPYING.txt",
       "sha256": "63263614cdd29f2f93cba85e992f041b31f9fc7b4033692f31269489a8a1b177",
       "component": "Exact byte-matched winpthread runtime"
+    },
+    {
+      "path": "packaging/media/runtime-notices/Pillow-libXau-1.0.12-COPYING.txt",
+      "sha256": "56abe29bb1d9806a9e04fa9f80fed2c0f18027594df3f098148d814aef6bddfa",
+      "component": "Mac Pillow libXau 1.0.12 runtime",
+      "url": "https://gitlab.freedesktop.org/xorg/lib/libxau/-/raw/libXau-1.0.12/COPYING"
+    },
+    {
+      "path": "packaging/media/runtime-notices/Pillow-libxcb-1.17.0-COPYING.txt",
+      "sha256": "c5ffbfeaa501071ceeb97b7de2c0d703fdaa35de01c0fb6cbac1c28453a3e9fd",
+      "component": "Mac Pillow libxcb 1.17.0 runtime",
+      "url": "https://gitlab.freedesktop.org/xorg/lib/libxcb/-/raw/libxcb-1.17.0/COPYING"
+    },
+    {
+      "path": "packaging/media/runtime-notices/Pillow-libyuv-644251f252a84bf8ce91ff0aca86a9b16b069ab8-LICENSE.txt",
+      "sha256": "2b2cc1180c7e6988328ad2033b04b80117419db9c4c584918bbb3cfec7e9364f",
+      "component": "Mac/Windows Pillow libavif retained libyuv",
+      "url": "https://chromium.googlesource.com/libyuv/libyuv/+/644251f252a84bf8ce91ff0aca86a9b16b069ab8/LICENSE?format=TEXT"
     }
   ]
 }

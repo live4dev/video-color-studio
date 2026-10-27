@@ -53,6 +53,9 @@ PROJECT_FILES = (
     "README.md",
     "DECISIONS.md",
     "THIRD_PARTY_NOTICES.md",
+    "THIRD_PARTY_LICENSES.md",
+    "TESTING.md",
+    "MILESTONES.md",
     "AGENTS.md",
     "FREEDIVE_COLOR_STUDIO_SPEC.md",
 )
