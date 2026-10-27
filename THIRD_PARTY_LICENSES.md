@@ -22,6 +22,8 @@ OpenCV DNN. Уточнение GrabCut выполняется локально �
 | OpenCV headless | Фильтры, 16-bit PNG | Apache-2.0 (OpenCV 4.5+); https://opencv.org/license/ |
 | Pillow / LittleCMS | EXIF, ICC, декодирование | MIT-CMU / MIT; https://pillow.readthedocs.io/en/stable/about.html#license |
 | tifffile | 16-bit TIFF | BSD-3-Clause; https://github.com/cgohlke/tifffile |
+| PyAV 15.1.0 macOS / 16.1.0 Windows | PTS-aware decode/encode/remux | BSD; https://github.com/PyAV-Org/PyAV |
+| FFmpeg 7.1.1 macOS / 8.0.1 Windows, x264/x265 | Локальный media backend | Комбинация GPLv3; точные исходники/patches в отдельном source ZIP |
 | PyInstaller | Сборка standalone | GPL-2.0-or-later с исключением для bundling; https://pyinstaller.org/en/stable/license.html |
 | pytest / pytest-qt / Ruff | Только разработка | MIT / MIT / MIT |
 
@@ -36,13 +38,37 @@ OpenCV DNN. Уточнение GrabCut выполняется локально �
 в папку `licenses/dependencies`; manifest содержит точные версии. Отдельные Qt-модули
 могут иметь другие лицензии: в коде используются только Core, Gui и Widgets.
 
-**FFmpeg не поставляется и не вызывается в этапе A.** OpenCV wheel может содержать
-свои media-библиотеки и LGPL-компоненты; их notices собираются из wheel. Это не
-настроенный backend видео. В этапе C нужна отдельная проверка конкретных бинарников
-FFmpeg/ffprobe, доступных кодеков и условий распространения. Произвольная GPL-сборка
-не должна автоматически попасть в релиз.
+В актуальной macOS-сборке OpenCV собран из проверенного исходника без FFmpeg и
+AVFoundation. Его роль — изображения, фильтры, сегментация и optical flow.
+PyAV содержит собственные локальные библиотеки FFmpeg; системный FFmpeg не требуется.
+Входные demuxer/protocol ограничены локальным MOV/MP4, скрытых сетевых загрузок нет.
+
+**Автономный дистрибутив в целом распространяется на условиях GPLv3.** Собственные
+исходные файлы приложения сохраняют лицензию MIT. В PyAV 15.1.0 community wheel
+есть x264/x265; patch производителя убирает их из GPL-проверок configure, но не
+меняет лицензии. Строка LGPL из avcodec не принимается за описание всей комбинации.
+Происхождение: pyav-ffmpeg `7.1.1-6`, FFmpeg `7.1.1`; точные записи находятся в
+[packaging/media/NOTICE.md](packaging/media/NOTICE.md). Полные тексты лицензий,
+совпадающие исходники библиотек, patches и рецепты сборки предоставлены рядом
+с приложением в `Freedive_Color_Studio_Corresponding_Source.zip` и его JSON checksum.
+Инструкции — [docs/CORRESPONDING_SOURCE.md](docs/CORRESPONDING_SOURCE.md).
+
+Qt/PySide/Shiboken используются динамически. Их исходники 6.8.3 и полные LGPL/GPL
+тексты также входят в source ZIP. Изменять и пересобирать библиотеки разрешено;
+ограничений на изучение и отладку изменений нет. На macOS изменённую локальную
+сборку можно заново подписать технической ad-hoc подписью `codesign --force --deep
+--sign - "Freedive Color Studio.app"`, без сертификата издателя.
+
+Архив источников фиксирует проверенную платформу. Windows wheel содержит другой
+набор DLL; его происхождение и совместимость лицензий проверяются отдельно.
+Неполный/несовместимый набор не считается готовым для распространения.
 
 Тестовое фото, автор и public-domain dedication описаны в
 `tests/fixtures/ATTRIBUTION.md`. В экспортируемые фотографии надписи не добавляются.
+Дополнительный движущийся подводный ролик для QA: It is a wonderful world,
+[Backstroke Underwater](https://commons.wikimedia.org/wiki/File:Backstroke_Underwater.webm),
+CC BY-SA 4.0. Его атрибуция и лицензия относятся к самому медиа и производным
+QA-результатам; тестовый ролик не входит в приложение. Контролируемые тестовые
+MP4 с изменением света созданы из public-domain фотографии и синтетического звука.
 Сборки MVP не имеют Developer ID/Authenticode и notarization; автоматическая
 ad-hoc подпись Mach-O при freeze не равнозначна подписи издателя.

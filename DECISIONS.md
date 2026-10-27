@@ -150,5 +150,29 @@ Freedive Color Studio                         Импорт   Экспорт
 - Для PCM и другого MP4-несовместимого звука GUI предлагает MOV, включая preview.
   Серия сохраняет исходный контейнер MP4/MOV, чтобы не терять звук при выборе формата.
 - Нативный OpenCV собран без FFmpeg/AVFoundation: официальный macOS wheel одновременно
-  с PyAV загружал одинаковые Objective-C классы. Новый wheel устранит сам конфликт,
+  с PyAV загружал одинаковые Objective-C классы. Новый wheel устранил сам конфликт,
   а не скроет предупреждение; provenance/flags/проверки — docs/NATIVE_OPENCV.md.
+
+## D — автономные дистрибутивы
+
+- macOS использует PyInstaller onedir и локальные модели/библиотеки; архив проверяется
+  после распаковки в Unicode-путь. Windows — настоящие AMD64 PE запускатели с частным
+  CPython 3.13.17, изолированным `._pth` и UTF-8. На Windows в этой сессии они не запускались.
+- Для macOS сохранён PyAV 15.1.0 из-за minimum OS 13; для Windows выбран официальный
+  16.1.0/FFmpeg 8.0.1 без несовместимой старой SSL-связки. В uv.lock есть platform markers.
+- Официальный Windows OpenCV содержит статический Intel IPP с условиями, мешающими
+  выбранному открытому дистрибутиву. Поэтому собран собственный AMD64 cv2.pyd без IPP,
+  FFmpeg и захвата видео: core/imgproc/imgcodecs/photo/dnn/video, Python limited API.
+  Кодеки видео остаются в PyAV. В .pyd нет дополнительных GCC/C++ DLL-зависимостей.
+- Windows-пакет подготовлен cross build на Mac; PE closure, source/model SHA и загрузчик
+  проверены. Минимальный Python loader дополнительно проверен с настоящей macOS-библиотекой:
+  ONNX inference, GrabCut, optical flow и image codecs. Это не native Windows acceptance.
+- Native Windows CMake/Ninja использует настоящие PE-драйверы Zig через CreateProcessW,
+  а не неявный запуск .cmd. Unicode, пробелы и специальные символы не проходят через shell.
+- Связка FFmpeg/x264/x265 требует GPLv3 для комбинированного дистрибутива. Собственный
+  код сохраняет MIT; полные соответствующие исходники GNU/Qt компонентов и точные
+  source-access записи для остальных библиотек распространяются рядом с бинарниками.
+  Источники и licenses проверяются до финализации Windows ZIP, с привязкой к payload SHA.
+- Подпись издателя, нотариализация, реальная Windows, Intel Mac и чистая macOS 13 не
+  подменяются статическими проверками. CI готовит эти отдельные проверки; запуск CI здесь
+  не выполнялся, удалённый репозиторий автоматически не создавался.

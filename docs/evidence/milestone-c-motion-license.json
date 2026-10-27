@@ -1,0 +1,15 @@
+{
+  "title": "Backstroke Underwater",
+  "author": "It is a wonderful world",
+  "source_url": "https://commons.wikimedia.org/wiki/File:Backstroke_Underwater.webm",
+  "original_url": "https://upload.wikimedia.org/wikipedia/commons/1/1a/Backstroke_Underwater.webm",
+  "license": "CC-BY-SA-4.0",
+  "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+  "original_sha1": "ce0e4fa298510cd33dbd1d446845cfed4d080ee6",
+  "original_sha256": "b0455c98d87ac77f532cfd7ac6cf3ff2b1f8444bb20af3d0bed43b62b027d2f0",
+  "source_kind": "Actual underwater pool footage with a moving swimmer; not freediving in open sea",
+  "input_preparation": "Re-encode VP8/Vorbis to H264/AAC MP4 for supported application input; preserve framing, dimensions, frame presentation times and original audio content",
+  "output_changes": "Conservative Natural color grade; separate QA frame comparisons carry labels",
+  "derivative_media_license": "CC-BY-SA-4.0",
+  "prepared_mp4_sha256": "8da929bec67f280669284ff0a584813d9c0c4a51f3de70049764e233a18407fa"
+}
