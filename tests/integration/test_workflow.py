@@ -131,3 +131,17 @@ def test_preview_uses_same_parameters_as_export(photo_path, tmp_path):
     output = tmp_path / "out.png"
     export_photo(photo_path, output, PRESETS["natural"], analysis=preview.analysis)
     np.testing.assert_allclose(preview.result, load_photo(output).rgb, atol=1.1 / 255)
+
+
+def test_export_to_filesystem_without_hard_links(photo_path, tmp_path, monkeypatch):
+    import errno
+
+    def unsupported_link(*_args):
+        raise OSError(errno.EOPNOTSUPP, "No hard links on this filesystem")
+
+    monkeypatch.setattr("freedive_color.core.image_pipeline.os.link", unsupported_link)
+    output = tmp_path / "exfat.png"
+    export_photo(photo_path, output, PRESETS["natural"])
+    assert load_photo(output).rgb.shape == (96, 128, 3)
+    assert output.with_suffix(".png.freedive.json").exists()
+    assert not list(tmp_path.glob(".freedive-*"))

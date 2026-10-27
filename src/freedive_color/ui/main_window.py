@@ -225,6 +225,7 @@ class MainWindow(QMainWindow):
         self.depth_combo.addItem(_("8 бит"), 8)
         self.depth_combo.addItem(_("16 бит"), 16)
         self.depth_combo.setEnabled(False)
+        self.depth_combo.currentIndexChanged.connect(self._depth_changed)
         form.addRow(_("Глубина"), self.depth_combo)
         self.quality_spin = QSpinBox()
         self.quality_spin.setRange(1, 100)
@@ -244,7 +245,7 @@ class MainWindow(QMainWindow):
         export_note.setObjectName("metadata")
         export_layout.addWidget(export_note)
         stage_note = QLabel(
-            _("Фото-MVP: глобальная коррекция. Маски кожи, серии и видео — следующие этапы.")
+            _("Регуляторы действуют на весь снимок. Кожа и вода изменяются вместе.")
         )
         stage_note.setWordWrap(True)
         stage_note.setObjectName("metadata")
@@ -538,6 +539,15 @@ class MainWindow(QMainWindow):
         self.quality_spin.setEnabled(jpeg)
         if jpeg:
             self.depth_combo.setCurrentIndex(0)
+        self._depth_changed()
+
+    def _depth_changed(self) -> None:
+        limited_metadata = (
+            self.format_combo.currentData() == ".tiff" and self.depth_combo.currentData() == 16
+        )
+        self.gps_check.setEnabled(not limited_metadata)
+        if limited_metadata:
+            self.gps_check.setChecked(False)
 
     def export_dialog(self) -> None:
         if self.preview is None or not self.export_button.isEnabled():

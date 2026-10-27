@@ -1,5 +1,6 @@
 """Shared photo workflow for CLI and GUI; stages all output before committing it."""
 
+import errno
 import os
 import shutil
 import tempfile
@@ -40,6 +41,28 @@ class Preview:
     photo: Photo
     analysis: SceneAnalysis
     result: np.ndarray
+
+
+def _publish(
+    staging: Path, destination: Path, published: list[Path], token: CancellationToken
+) -> None:
+    try:
+        os.link(staging, destination)
+        published.append(destination)
+    except OSError as exc:
+        unsupported = {errno.EPERM, errno.EOPNOTSUPP, errno.ENOSYS, errno.EXDEV}
+        if exc.errno not in unsupported:
+            raise
+        # FAT/exFAT media do not support hard links. Exclusive creation still protects every
+        # existing file; a failed/cancelled copy is tracked immediately and removed by the caller.
+        with destination.open("xb") as output:
+            published.append(destination)
+            with staging.open("rb") as source:
+                for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                    token.check()
+                    output.write(chunk)
+            output.flush()
+            os.fsync(output.fileno())
 
 
 def make_preview(
@@ -153,10 +176,8 @@ def export_photo(
         progress(95, "Сохранение результата и настроек…")
         # Hard-link publication is atomic and fails if a file appeared since preflight.
         # Both staging files are on the destination volume. Never use os.replace on user paths.
-        os.link(temp_image, destination)
-        published.append(destination)
-        os.link(temp_json, sidecar)
-        published.append(sidecar)
+        _publish(temp_image, destination, published, token)
+        _publish(temp_json, sidecar, published, token)
         progress(100, "Экспорт завершён")
         return report
     except BaseException as exc:

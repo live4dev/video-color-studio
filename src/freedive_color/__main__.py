@@ -3,11 +3,12 @@ import sys
 
 def main() -> int:
     arguments = sys.argv[1:]
-    if "--smoke-test" in arguments:
+    flags = {argument.split("=", 1)[0] for argument in arguments}
+    if "--smoke-test" in flags:
         from .smoke import run
 
         return run(arguments)
-    if any(arg in arguments for arg in ("--input", "--output", "--help", "-h")):
+    if flags.intersection(("--input", "--output", "--help", "-h")):
         from .cli import run
 
         return run(arguments)

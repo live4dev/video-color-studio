@@ -52,6 +52,9 @@ def test_drag_drop_controls_split_and_export(window, qtbot, photo_path, tmp_path
     wait_ready(qtbot, window)
     assert window.library.count() == 1
     assert not window.viewer.after.isNull()
+    image_rect = window.viewer.image_rect()
+    assert image_rect.width() > window.viewer.width() * 0.6
+    assert abs(image_rect.center().y() - window.viewer.height() / 2) < 1
     before = window.preview.result.copy()
     QTest.mouseClick(window.controls.preset_buttons["vivid"], Qt.MouseButton.LeftButton)
     wait_ready(qtbot, window)
@@ -130,3 +133,15 @@ def test_read_error_is_visible_and_next_import_works(window, qtbot, photo_path, 
     window.import_paths([photo_path])
     wait_ready(qtbot, window)
     assert window.export_button.isEnabled()
+
+
+def test_loading_precise_settings_does_not_round_them(window):
+    from dataclasses import replace
+
+    from freedive_color.core.presets import get_preset
+
+    exact = replace(get_preset("natural"), temperature=0.012345, exposure=0.125)
+    window.controls.set_settings(exact, emit=False)
+    assert window.controls.settings() == exact
+    window.controls.sliders["contrast"].setValue(20)
+    assert window.controls.settings().temperature == 0.012345

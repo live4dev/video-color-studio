@@ -132,3 +132,57 @@ def test_export_gps_opt_in(tmp_path):
     with_gps.load(load_photo(path, keep_gps=True).exif_bytes)
     assert 34853 not in no_gps
     assert 34853 in with_gps
+
+
+@pytest.mark.parametrize("orientation", range(1, 9))
+@pytest.mark.parametrize("bits", (8, 16))
+def test_tiff_orientation_matches_source_pixels(tmp_path, orientation, bits):
+    pixels = np.arange(12 * 18 * 3, dtype=np.uint16).reshape(12, 18, 3)
+    pixels = pixels.astype(np.uint8) if bits == 8 else pixels * 60
+    path = tmp_path / "oriented.tiff"
+    tifffile.imwrite(
+        path,
+        pixels,
+        photometric="rgb",
+        metadata=None,
+        extratags=[(274, "H", 1, orientation, False)],
+    )
+    methods = {
+        2: Image.Transpose.FLIP_LEFT_RIGHT,
+        3: Image.Transpose.ROTATE_180,
+        4: Image.Transpose.FLIP_TOP_BOTTOM,
+        5: Image.Transpose.TRANSPOSE,
+        6: Image.Transpose.ROTATE_270,
+        7: Image.Transpose.TRANSVERSE,
+        8: Image.Transpose.ROTATE_90,
+    }
+    expected = pixels.copy()
+    if orientation in methods:
+        expected = np.stack(
+            [
+                np.asarray(Image.fromarray(pixels[..., channel]).transpose(methods[orientation]))
+                for channel in range(3)
+            ],
+            axis=2,
+        )
+    photo = load_photo(path)
+    np.testing.assert_allclose(photo.rgb * (255 if bits == 8 else 65535), expected, atol=0.004)
+    assert (photo.width, photo.height) == (expected.shape[1], expected.shape[0])
+
+
+def test_rgb_png_transparency_key_is_preserved(tmp_path):
+    path = tmp_path / "color_key.png"
+    Image.new("RGB", (10, 10), (20, 30, 40)).save(path, transparency=(20, 30, 40))
+    photo = load_photo(path)
+    assert photo.alpha is not None and photo.alpha.max() == 0
+
+
+def test_non_srgb_gamma_is_not_graded_silently(tmp_path):
+    metadata = PngImagePlugin.PngInfo()
+    import struct
+
+    metadata.add(b"gAMA", struct.pack(">I", 100000))
+    path = tmp_path / "linear.png"
+    Image.new("RGB", (10, 10)).save(path, pnginfo=metadata)
+    with pytest.raises(StudioError, match="gamma"):
+        load_photo(path)

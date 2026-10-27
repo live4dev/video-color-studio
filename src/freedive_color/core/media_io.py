@@ -2,6 +2,7 @@
 
 import io
 import os
+import re
 import struct
 import zlib
 from dataclasses import dataclass, field
@@ -99,6 +100,8 @@ def _png_depth_and_hdr(path: Path) -> tuple[int, bool]:
             elif kind == b"cICP":
                 data = handle.read(length)
                 hdr = len(data) >= 2 and data[1] in (16, 18)
+                if not hdr and data != bytes([1, 13, 0, 1]):
+                    raise StudioError("Этот cICP-профиль PNG не поддерживается. Нужен SDR sRGB.")
             elif kind in (b"IDAT", b"IEND"):
                 break
             else:
@@ -119,6 +122,10 @@ def load_photo(path: str | Path, max_edge: int | None = None, keep_gps: bool = F
         before = signature(path)
         with Image.open(path) as image:
             width, height = image.size
+            if image.format == "TIFF":
+                # Pillow may expose the display-oriented size already. TIFF tags describe the
+                # stored raster; use those so EXIF swaps width/height exactly once in metadata.
+                width, height = image.tag_v2[256], image.tag_v2[257]
             if width * height > MAX_PIXELS:
                 raise StudioError("Фото больше 40 Мп. Уменьшите копию перед импортом в этот MVP.")
             if image.format not in ("JPEG", "PNG", "TIFF") or getattr(image, "n_frames", 1) != 1:
@@ -145,7 +152,7 @@ def load_photo(path: str | Path, max_edge: int | None = None, keep_gps: bool = F
                 try:
                     profile = ImageCms.ImageCmsProfile(io.BytesIO(profile_bytes))
                     description = ImageCms.getProfileDescription(profile).strip()
-                    if any(token in description.lower() for token in ("pq", "hlg", "hdr", "log")):
+                    if re.search(r"\b(pq|hlg|hdr|log|logc|s-log\d?|v-log)\b", description, re.I):
                         raise StudioError("HDR/Log ICC не поддерживается. Нужен SDR sRGB.")
                 except (OSError, ValueError, TypeError) as exc:
                     raise StudioError(
@@ -155,6 +162,10 @@ def load_photo(path: str | Path, max_edge: int | None = None, keep_gps: bool = F
             else:
                 profile_status = "sRGB (профиль не указан)"
                 warnings.append("ICC-профиль отсутствует: используется sRGB.")
+                if "gamma" in image.info and abs(image.info["gamma"] - 0.45455) > 0.01:
+                    raise StudioError(
+                        "PNG с нестандартной gamma: сначала преобразуйте копию в sRGB."
+                    )
             safe_exif = _safe_exif(exif, keep_gps)
             source_format = image.format
             if depth == 16:
@@ -197,7 +208,7 @@ def load_photo(path: str | Path, max_edge: int | None = None, keep_gps: bool = F
                     )
                 image = ImageOps.exif_transpose(image)
                 alpha_image = image.getchannel("A") if "A" in image.getbands() else None
-                if image.mode == "P" and "transparency" in image.info:
+                if "transparency" in image.info:
                     alpha_image = image.convert("RGBA").getchannel("A")
                 if profile is not None:
                     base = (

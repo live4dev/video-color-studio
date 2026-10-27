@@ -116,6 +116,11 @@ class GradeControls(QWidget):
         super().__init__(parent)
         self.preset_name = "natural"
         self._updating = False
+        self._exact_values = {
+            key: getattr(get_preset("natural"), key)
+            for _group, specs in CONTROL_GROUPS
+            for key, *_rest in specs
+        }
         self.sliders: dict[str, ResetSlider] = {}
         self.values: dict[str, QLabel] = {}
         self.preset_buttons: dict[str, QPushButton] = {}
@@ -178,11 +183,12 @@ class GradeControls(QWidget):
     def settings(self) -> GradeSettings:
         return GradeSettings(
             preset=self.preset_name,
-            **{key: slider.value() / 100 for key, slider in self.sliders.items()},
+            **self._exact_values,
         )
 
     def set_settings(self, settings: GradeSettings, emit: bool = True) -> None:
         self._updating = True
+        self._exact_values = {key: getattr(settings, key) for key in self.sliders}
         self.preset_name = settings.preset
         self.preset_group.setExclusive(False)
         for name, button in self.preset_buttons.items():
@@ -206,16 +212,14 @@ class GradeControls(QWidget):
         self.set_settings(get_preset(name))
 
     def _display_value(self, key: str) -> None:
-        value = self.sliders[key].value()
-        self.values[key].setText(f"{value / 100:+.2f} EV" if key == "exposure" else str(value))
+        value = self._exact_values[key] * 100
+        self.values[key].setText(f"{value / 100:+.3g} EV" if key == "exposure" else f"{value:g}")
 
     def _update_note(self) -> None:
         base = get_preset(self.preset_name if self.preset_name != "custom" else "natural")
         current = self.settings()
-        # Controls have a 0.01 resolution, so compare against the displayed base values.
         changed = any(
-            round(getattr(base, key) * 100) != slider.value()
-            for key, slider in self.sliders.items()
+            abs(getattr(base, key) - self._exact_values[key]) > 1e-9 for key in self.sliders
         )
         text = {
             "natural": "Естественный цвет, умеренный контраст.",
@@ -226,6 +230,8 @@ class GradeControls(QWidget):
         self.preset_note.setText(_(text) + (_(" Изменён вручную.") if changed else ""))
 
     def _changed(self, key: str) -> None:
+        if not self._updating:
+            self._exact_values[key] = self.sliders[key].value() / 100
         self._display_value(key)
         if not self._updating:
             self._update_note()

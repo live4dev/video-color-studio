@@ -77,13 +77,15 @@ class CompareViewer(QWidget):
         if self.before.isNull():
             return
         self.fitting = False
-        self.scale = self.source_width / self.before.width()
+        self.scale = self.source_width / self.before.width() / self.devicePixelRatioF()
         self.offset = QPointF()
         self._emit_zoom()
         self.update()
 
     def _emit_zoom(self) -> None:
-        self.zoom_changed.emit(self.scale * self.before.width() / max(1, self.source_width))
+        self.zoom_changed.emit(
+            self.scale * self.before.width() / max(1, self.source_width) * self.devicePixelRatioF()
+        )
 
     def image_rect(self) -> QRectF:
         width, height = self.before.width() * self.scale, self.before.height() * self.scale
@@ -219,7 +221,7 @@ class CompareViewer(QWidget):
         if self.before.isNull():
             return
         old = self.scale
-        maximum = self.source_width / self.before.width() * 5
+        maximum = self.source_width / self.before.width() * 5 / self.devicePixelRatioF()
         minimum = min(0.05, self.source_width / self.before.width() * 0.05)
         self.scale = float(np.clip(old * 1.15 ** (event.angleDelta().y() / 120), minimum, maximum))
         relative = event.position() - QPointF(self.width() / 2, self.height() / 2)

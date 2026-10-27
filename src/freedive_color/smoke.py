@@ -62,6 +62,19 @@ def run(arguments: list[str]) -> int:
         )
 
         def capture_and_exit():
+            window.viewer.fit()
+            focused = app.focusWidget()
+            if focused:
+                focused.clearFocus()
+            record["viewer"] = {
+                "buffer_width": window.viewer.before.width(),
+                "scale": window.viewer.scale,
+                "fitting": window.viewer.fitting,
+                "viewport": [window.viewer.width(), window.viewer.height()],
+            }
+            (args.evidence / "gui_smoke.json").write_text(
+                json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
             window.grab().save(str(args.evidence / "app_window.png"))
             window.close()
             app.exit(0 if unchanged else 2)

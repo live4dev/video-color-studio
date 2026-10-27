@@ -4,6 +4,7 @@ from PySide6.QtWidgets import QApplication
 STYLE = """
 QMainWindow, QWidget { background: #20262b; color: #dbe3e7; }
 QWidget { font-size: 13px; }
+QLabel { background: transparent; }
 QWidget#header { background: #263038; border-bottom: 1px solid #38444c; }
 QLabel#brand { font-size: 20px; font-weight: 600; }
 QLabel#subtle, QLabel#metadata { color: #99aab5; }
@@ -41,7 +42,7 @@ QSlider::sub-page:horizontal { background: #79b7c1; border-radius: 1px; }
 QSlider::handle:horizontal {
   background: #d5e7ed; width: 12px; margin: -5px 0; border-radius: 6px; border: 1px solid #91afb8;
 }
-QSlider:focus::handle:horizontal { border: 2px solid #75c9cb; }
+QSlider::handle:horizontal:focus { border: 2px solid #75c9cb; }
 QComboBox, QSpinBox {
   background: #2b363e; border: 1px solid #43515a; border-radius: 4px; padding: 6px;
 }
