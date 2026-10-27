@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "freedive-color-studio"
+version = "0.1.0"
+description = "Offline, conservative underwater photo grading for Windows and macOS"
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+license = "MIT"
+dependencies = [
+  "numpy>=2.2,<3",
+  "opencv-python-headless>=4.11,<5",
+  "Pillow>=11.1,<14",
+  "PySide6-Essentials>=6.8,<7",
+  "tifffile>=2025.1.10",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3,<10", "pytest-qt>=4.4,<5", "ruff>=0.11,<1"]
+build = ["pyinstaller>=6.12,<7"]
+
+[project.scripts]
+freedive-color = "freedive_color.__main__:main"
+
+[project.gui-scripts]
+freedive-color-studio = "freedive_color.ui.app:run"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/freedive_color"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+qt_api = "pyside6"
+filterwarnings = ["error::RuntimeWarning"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
