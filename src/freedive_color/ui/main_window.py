@@ -1,0 +1,704 @@
+from pathlib import Path
+
+from PySide6.QtCore import QSize, Qt, QThreadPool, QTimer, Signal
+from PySide6.QtGui import QAction, QCloseEvent, QIcon, QKeySequence, QPixmap
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QButtonGroup,
+    QCheckBox,
+    QComboBox,
+    QFileDialog,
+    QFormLayout,
+    QHBoxLayout,
+    QLabel,
+    QListWidget,
+    QListWidgetItem,
+    QMainWindow,
+    QProgressBar,
+    QPushButton,
+    QScrollArea,
+    QSpinBox,
+    QSplitter,
+    QStyle,
+    QVBoxLayout,
+    QWidget,
+)
+
+from freedive_color.core.analyze import analyze_scene
+from freedive_color.core.color_pipeline import grade_image
+from freedive_color.core.errors import StudioError
+from freedive_color.core.image_pipeline import CancellationToken, Preview, export_photo
+from freedive_color.core.media_io import PHOTO_EXTENSIONS, load_photo
+from freedive_color.core.presets import GradeSettings, get_preset
+from freedive_color.core.project import load_settings, save_settings
+
+from .controls import GradeControls
+from .strings import _
+from .viewer import CompareViewer, to_qimage
+from .workers import Worker
+
+PATH_ROLE = Qt.ItemDataRole.UserRole
+SETTINGS_ROLE = Qt.ItemDataRole.UserRole + 1
+OPEN_FILTER = "Фото SDR (*.jpg *.jpeg *.png *.tif *.tiff)"
+
+
+class MainWindow(QMainWindow):
+    preview_ready = Signal()
+    export_completed = Signal(object)
+    operation_failed = Signal(str)
+
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Freedive Color Studio")
+        self.resize(1440, 920)
+        self.setMinimumSize(1080, 720)
+        self.setAcceptDrops(True)
+        self.pool = QThreadPool(self)
+        self.pool.setMaxThreadCount(1)
+        self.preview: Preview | None = None
+        self.rendered_settings: GradeSettings | None = None
+        self.last_export: dict | None = None
+        self._jobs: dict[int, tuple[Worker, str, object]] = {}
+        self._counter = 0
+        self._view_job: int | None = None
+        self._export_job: int | None = None
+        self._render_pending = False
+        self._full_loading = False
+        self._closing = False
+        self._debounce = QTimer(self)
+        self._debounce.setSingleShot(True)
+        self._debounce.setInterval(140)
+        self._debounce.timeout.connect(self._render)
+        self._build_ui()
+        self._build_menu()
+        self._update_actions()
+
+    def _build_ui(self) -> None:
+        root = QWidget()
+        self.setCentralWidget(root)
+        layout = QVBoxLayout(root)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        header = QWidget()
+        header.setObjectName("header")
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(22, 16, 20, 16)
+        brand = QLabel("Freedive Color Studio")
+        brand.setObjectName("brand")
+        header_layout.addWidget(brand)
+        stage = QLabel(_("Фото · v0.1"))
+        stage.setObjectName("subtle")
+        header_layout.addWidget(stage)
+        header_layout.addStretch()
+        self.import_button = QPushButton(_("Импорт"))
+        self.import_button.setObjectName("import_button")
+        self.import_button.setToolTip(_("Открыть фотографии · ⌘O / Ctrl+O"))
+        self.import_button.clicked.connect(self.open_dialog)
+        header_layout.addWidget(self.import_button)
+        self.export_button = QPushButton(_("Экспорт фото"))
+        self.export_button.setObjectName("primary")
+        self.export_button.clicked.connect(self.export_dialog)
+        header_layout.addWidget(self.export_button)
+        layout.addWidget(header)
+
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setChildrenCollapsible(False)
+        splitter.setHandleWidth(1)
+        layout.addWidget(splitter, 1)
+        library_panel = QWidget()
+        library_panel.setMinimumWidth(175)
+        library_layout = QVBoxLayout(library_panel)
+        library_layout.setContentsMargins(10, 16, 10, 10)
+        library_layout.setSpacing(10)
+        title = QLabel(_("Библиотека"))
+        title.setObjectName("sectionTitle")
+        library_layout.addWidget(title)
+        self.library_count = QLabel(_("Нет фотографий"))
+        self.library_count.setObjectName("subtle")
+        library_layout.addWidget(self.library_count)
+        self.library = QListWidget()
+        self.library.setObjectName("library")
+        self.library.setIconSize(QSize(68, 58))
+        self.library.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.library.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.library.currentItemChanged.connect(self._selection_changed)
+        self.library.itemDoubleClicked.connect(lambda _item: self._load_selected())
+        library_layout.addWidget(self.library, 1)
+        folder_button = QPushButton(_("Открыть папку"))
+        folder_button.clicked.connect(self.open_folder)
+        self.folder_button = folder_button
+        library_layout.addWidget(folder_button)
+        note = QLabel(_("JPEG, PNG, TIFF\nОбработка на этом компьютере"))
+        note.setObjectName("metadata")
+        note.setWordWrap(True)
+        library_layout.addWidget(note)
+        splitter.addWidget(library_panel)
+
+        center = QWidget()
+        center.setMinimumWidth(380)
+        center_layout = QVBoxLayout(center)
+        center_layout.setContentsMargins(0, 0, 0, 0)
+        center_layout.setSpacing(0)
+        toolbar = QHBoxLayout()
+        toolbar.setContentsMargins(14, 12, 14, 12)
+        toolbar.setSpacing(5)
+        self.mode_group = QButtonGroup(self)
+        self.mode_buttons = {}
+        for mode, label in (("before", "До"), ("compare", "Сравнение"), ("after", "После")):
+            button = QPushButton(_(label))
+            button.setCheckable(True)
+            button.setObjectName("view_" + mode)
+            self.mode_group.addButton(button)
+            self.mode_buttons[mode] = button
+            button.clicked.connect(lambda _checked=False, chosen=mode: self.set_view_mode(chosen))
+            toolbar.addWidget(button)
+        self.mode_buttons["compare"].setChecked(True)
+        toolbar.addStretch()
+        self.zoom_label = QLabel("—")
+        self.zoom_label.setObjectName("subtle")
+        toolbar.addWidget(self.zoom_label)
+        self.fit_button = QPushButton(_("Вписать"))
+        self.fit_button.setToolTip(_("Вписать в окно · F"))
+        toolbar.addWidget(self.fit_button)
+        self.one_button = QPushButton("100%")
+        self.one_button.setToolTip(_("Полное разрешение, 1 пиксель фото = 1 пиксель просмотра"))
+        toolbar.addWidget(self.one_button)
+        center_layout.addLayout(toolbar)
+        self.viewer = CompareViewer()
+        self.viewer.open_requested.connect(self.open_dialog)
+        self.viewer.zoom_changed.connect(self._zoom_changed)
+        self.fit_button.clicked.connect(self.viewer.fit)
+        self.one_button.clicked.connect(self._one_to_one)
+        center_layout.addWidget(self.viewer, 1)
+        info_layout = QVBoxLayout()
+        info_layout.setContentsMargins(18, 11, 18, 12)
+        info_layout.setSpacing(5)
+        self.image_title = QLabel(_("Оригинал остаётся без изменений"))
+        info_layout.addWidget(self.image_title)
+        self.metadata_label = QLabel(_("Откройте фотографию, выберите стиль и настройте цвет."))
+        self.metadata_label.setObjectName("metadata")
+        self.metadata_label.setWordWrap(True)
+        info_layout.addWidget(self.metadata_label)
+        self.warning_label = QLabel()
+        self.warning_label.setObjectName("warning")
+        self.warning_label.setWordWrap(True)
+        info_layout.addWidget(self.warning_label)
+        center_layout.addLayout(info_layout)
+        splitter.addWidget(center)
+
+        right_scroll = QScrollArea()
+        right_scroll.setMinimumWidth(295)
+        right_scroll.setMaximumWidth(380)
+        right_scroll.setWidgetResizable(True)
+        self.right_panel = QWidget()
+        right_layout = QVBoxLayout(self.right_panel)
+        right_layout.setContentsMargins(0, 0, 0, 8)
+        right_layout.setSpacing(6)
+        self.controls = GradeControls()
+        self.controls.settings_changed.connect(self._settings_changed)
+        right_layout.addWidget(self.controls)
+        presets_row = QHBoxLayout()
+        presets_row.setContentsMargins(16, 0, 16, 8)
+        save_button = QPushButton(_("Сохранить…"))
+        save_button.setToolTip(_("Сохранить параметры в локальный JSON"))
+        save_button.clicked.connect(self.save_settings_dialog)
+        load_button = QPushButton(_("Загрузить…"))
+        load_button.setToolTip(_("Загрузить JSON пресета или настройки из sidecar"))
+        load_button.clicked.connect(self.load_settings_dialog)
+        presets_row.addWidget(save_button)
+        presets_row.addWidget(load_button)
+        right_layout.addLayout(presets_row)
+        export_panel = QWidget()
+        export_layout = QVBoxLayout(export_panel)
+        export_layout.setContentsMargins(16, 6, 16, 10)
+        export_title = QLabel(_("Экспорт"))
+        export_title.setObjectName("sectionTitle")
+        export_layout.addWidget(export_title)
+        form = QFormLayout()
+        form.setHorizontalSpacing(12)
+        self.format_combo = QComboBox()
+        for label, suffix in (("JPEG", ".jpg"), ("PNG", ".png"), ("TIFF", ".tiff")):
+            self.format_combo.addItem(label, suffix)
+        self.format_combo.currentIndexChanged.connect(self._format_changed)
+        form.addRow(_("Формат"), self.format_combo)
+        self.depth_combo = QComboBox()
+        self.depth_combo.addItem(_("8 бит"), 8)
+        self.depth_combo.addItem(_("16 бит"), 16)
+        self.depth_combo.setEnabled(False)
+        form.addRow(_("Глубина"), self.depth_combo)
+        self.quality_spin = QSpinBox()
+        self.quality_spin.setRange(1, 100)
+        self.quality_spin.setValue(95)
+        form.addRow(_("Качество JPEG"), self.quality_spin)
+        export_layout.addLayout(form)
+        self.gps_check = QCheckBox(_("Сохранить GPS, если есть"))
+        self.gps_check.setToolTip(
+            _(
+                "По умолчанию координаты исключены из результата.\n"
+                "В TIFF 16 бит GPS/EXIF не переносятся."
+            )
+        )
+        export_layout.addWidget(self.gps_check)
+        export_note = QLabel(_("Исходный размер · sRGB\nПараметры сохраняются рядом в JSON."))
+        export_note.setWordWrap(True)
+        export_note.setObjectName("metadata")
+        export_layout.addWidget(export_note)
+        stage_note = QLabel(
+            _("Фото-MVP: глобальная коррекция. Маски кожи, серии и видео — следующие этапы.")
+        )
+        stage_note.setWordWrap(True)
+        stage_note.setObjectName("metadata")
+        export_layout.addWidget(stage_note)
+        right_layout.addWidget(export_panel)
+        right_layout.addStretch()
+        right_scroll.setWidget(self.right_panel)
+        splitter.addWidget(right_scroll)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setStretchFactor(2, 0)
+        splitter.setSizes([210, 900, 320])
+
+        footer = QWidget()
+        footer_layout = QVBoxLayout(footer)
+        footer_layout.setContentsMargins(18, 7, 18, 10)
+        footer_layout.setSpacing(7)
+        status_row = QHBoxLayout()
+        self.status_label = QLabel(_("Готово к импорту"))
+        self.status_label.setObjectName("status")
+        self.status_label.setWordWrap(True)
+        status_row.addWidget(self.status_label, 1)
+        self.cancel_button = QPushButton(_("Отменить"))
+        self.cancel_button.setObjectName("cancel_button")
+        self.cancel_button.clicked.connect(self.cancel_operation)
+        self.cancel_button.hide()
+        status_row.addWidget(self.cancel_button)
+        footer_layout.addLayout(status_row)
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setTextVisible(False)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        footer_layout.addWidget(self.progress_bar)
+        layout.addWidget(footer)
+
+    def _build_menu(self) -> None:
+        file_menu = self.menuBar().addMenu(_("Файл"))
+        open_action = QAction(_("Импорт фотографий…"), self)
+        open_action.setShortcut(QKeySequence.StandardKey.Open)
+        open_action.triggered.connect(self.open_dialog)
+        file_menu.addAction(open_action)
+        self.export_action = QAction(_("Экспорт фотографии…"), self)
+        self.export_action.setShortcut(QKeySequence("Ctrl+Shift+S"))
+        self.export_action.triggered.connect(self.export_dialog)
+        file_menu.addAction(self.export_action)
+        file_menu.addSeparator()
+        close = QAction(_("Закрыть"), self)
+        close.setShortcut(QKeySequence.StandardKey.Close)
+        close.triggered.connect(self.close)
+        file_menu.addAction(close)
+        view_menu = self.menuBar().addMenu(_("Просмотр"))
+        for text, key, callback in (
+            ("Вписать", "F", self.viewer.fit),
+            ("100%", "Ctrl+1", self._one_to_one),
+            ("До", "Alt+1", lambda: self.set_view_mode("before")),
+            ("Сравнение", "Alt+2", lambda: self.set_view_mode("compare")),
+            ("После", "Alt+3", lambda: self.set_view_mode("after")),
+        ):
+            action = QAction(_(text), self)
+            action.setShortcut(QKeySequence(key))
+            action.triggered.connect(callback)
+            view_menu.addAction(action)
+
+    def _update_actions(self) -> None:
+        exporting = self._export_job is not None
+        ready = self.preview is not None and not self._render_pending and not exporting
+        self.export_button.setEnabled(ready)
+        self.export_action.setEnabled(ready)
+        self.import_button.setEnabled(not exporting)
+        self.folder_button.setEnabled(not exporting)
+        self.library.setEnabled(not exporting)
+        self.right_panel.setEnabled(not exporting)
+        self.controls.setEnabled(self.preview is not None and not exporting)
+        self.fit_button.setEnabled(self.preview is not None)
+        self.one_button.setEnabled(self.preview is not None and not self._full_loading)
+
+    def _status(self, message: str, error: bool = False) -> None:
+        self.status_label.setText(message)
+        self.status_label.setStyleSheet("color: #edc79a;" if error else "")
+
+    def open_dialog(self) -> None:
+        if self._export_job is not None:
+            return
+        paths, _selected = QFileDialog.getOpenFileNames(
+            self, _("Импорт фотографий"), "", OPEN_FILTER
+        )
+        if paths:
+            self.import_paths([Path(path) for path in paths])
+
+    def open_folder(self) -> None:
+        path = QFileDialog.getExistingDirectory(self, _("Папка с фотографиями"))
+        if path:
+            self.import_paths([Path(path)])
+
+    def import_paths(self, paths: list[Path]) -> None:
+        if self._export_job is not None:
+            return
+        candidates = []
+        unsupported = []
+        for path in paths:
+            if path.is_dir():
+                try:
+                    candidates.extend(
+                        sorted(
+                            (
+                                child
+                                for child in path.iterdir()
+                                if child.is_file() and child.suffix.lower() in PHOTO_EXTENSIONS
+                            ),
+                            key=lambda child: child.name.casefold(),
+                        )[:500]
+                    )
+                except OSError:
+                    unsupported.append(path.name)
+            elif path.suffix.lower() in PHOTO_EXTENSIONS:
+                candidates.append(path)
+            else:
+                unsupported.append(path.name)
+        existing = {self.library.item(row).data(PATH_ROLE) for row in range(self.library.count())}
+        added = []
+        for path in candidates:
+            resolved = str(path.expanduser().resolve())
+            if resolved in existing:
+                continue
+            item = QListWidgetItem(path.name)
+            item.setToolTip(resolved)
+            item.setData(PATH_ROLE, resolved)
+            item.setData(SETTINGS_ROLE, get_preset("natural").to_dict())
+            item.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon))
+            self.library.addItem(item)
+            existing.add(resolved)
+            added.append(item)
+        self.library_count.setText(_("Фотографий: ") + str(self.library.count()))
+        if added:
+            self.library.setCurrentItem(added[0])
+        elif candidates and self.library.currentItem():
+            self._load_selected()
+        else:
+            self._status(_("В этой папке нет JPEG, PNG или TIFF."), error=True)
+        if unsupported:
+            self._status(
+                _("В этапе A доступны JPEG, PNG и TIFF. Не открыто: ") + ", ".join(unsupported[:3]),
+                error=True,
+            )
+
+    def _selection_changed(self, current, _previous) -> None:
+        if current:
+            self.controls.set_settings(
+                GradeSettings.from_dict(current.data(SETTINGS_ROLE)), emit=False
+            )
+            self._load_selected()
+
+    def _cancel_view_job(self) -> None:
+        if self._view_job in self._jobs:
+            self._jobs[self._view_job][0].token.cancel()
+        self._view_job = None
+
+    def _load_selected(self, full_resolution: bool = False) -> None:
+        item = self.library.currentItem()
+        if item is None or self._export_job is not None:
+            return
+        self._debounce.stop()
+        self._cancel_view_job()
+        source = Path(item.data(PATH_ROLE))
+        settings = self.controls.settings()
+        saved_analysis = self.preview.analysis if full_resolution and self.preview else None
+        expected_signature = (
+            self.preview.photo.stat_signature if full_resolution and self.preview else None
+        )
+        self._full_loading = full_resolution
+        self._render_pending = True
+        if not full_resolution:
+            self.preview = None
+            self.viewer.clear()
+            self.warning_label.clear()
+            self.image_title.setText(source.name)
+            self.metadata_label.setText(_("Чтение фотографии…"))
+        self._status(
+            _("Загрузка полного разрешения…") if full_resolution else _("Анализ фотографии…")
+        )
+
+        def operation(token, progress):
+            progress(10, _("Чтение фотографии…"))
+            photo = load_photo(source, max_edge=None if full_resolution else 1440)
+            if expected_signature and photo.stat_signature != expected_signature:
+                raise StudioError(_("Оригинал изменился. Импортируйте его ещё раз."))
+            token.check()
+            analysis = saved_analysis or analyze_scene(photo.rgb)
+            progress(50, _("Создание предпросмотра…"))
+            result = grade_image(photo.rgb, settings, analysis, token.check)
+            return Preview(photo, analysis, result)
+
+        def success(preview):
+            self.preview = preview
+            self.rendered_settings = settings
+            self._render_pending = False
+            self._full_loading = False
+            self.viewer.set_images(
+                to_qimage(preview.photo.rgb, preview.photo.alpha),
+                to_qimage(preview.result, preview.photo.alpha),
+                preview.photo.width,
+                reset_transform=not full_resolution,
+            )
+            if full_resolution:
+                self.viewer.one_to_one()
+            photo = preview.photo
+            thumb = QPixmap.fromImage(to_qimage(photo.rgb, photo.alpha)).scaled(
+                80,
+                60,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            item.setIcon(QIcon(thumb))
+            item.setText(source.name + "\n" + _("Готово"))
+            self.image_title.setText(source.name)
+            proxy_note = (
+                _("полное разрешение")
+                if photo.rgb.shape[1] == photo.width
+                else _("быстрый просмотр")
+            )
+            self.metadata_label.setText(
+                f"{photo.width} × {photo.height} px · {photo.bit_depth} бит · "
+                f"{photo.profile_status} · {proxy_note}"
+            )
+            self.warning_label.setText("\n".join(photo.warnings + list(preview.analysis.warnings)))
+            self.setWindowTitle(f"{source.name} — Freedive Color Studio")
+            self._status(_("Перетащите линию для сравнения. Все регуляторы доступны справа."))
+            self.preview_ready.emit()
+
+        self._submit("view", operation, success)
+        self._update_actions()
+
+    def _settings_changed(self, settings: GradeSettings) -> None:
+        item = self.library.currentItem()
+        if item:
+            item.setData(SETTINGS_ROLE, settings.to_dict())
+        if self.preview is None:
+            return
+        self._cancel_view_job()
+        self._render_pending = True
+        self._debounce.start()
+        self._update_actions()
+
+    def _render(self) -> None:
+        if self.preview is None or self._export_job is not None:
+            return
+        photo = self.preview.photo
+        analysis = self.preview.analysis
+        settings = self.controls.settings()
+        self._status(_("Обновление цвета…"))
+
+        def operation(token, _progress):
+            return grade_image(photo.rgb, settings, analysis, token.check)
+
+        def success(result):
+            self.preview.result = result
+            self.rendered_settings = settings
+            self._render_pending = False
+            self.viewer.set_images(self.viewer.before, to_qimage(result, photo.alpha), photo.width)
+            self._status(_("Предпросмотр обновлён"))
+            self.preview_ready.emit()
+
+        self._submit("view", operation, success)
+
+    def _one_to_one(self) -> None:
+        if self.preview is None:
+            return
+        photo = self.preview.photo
+        if photo.rgb.shape[:2] != (photo.height, photo.width):
+            self._load_selected(full_resolution=True)
+        else:
+            self.viewer.one_to_one()
+
+    def _zoom_changed(self, scale: float) -> None:
+        self.zoom_label.setText(f"{scale * 100:.0f}%")
+        if self.preview is None or self._full_loading or self._export_job is not None:
+            return
+        photo = self.preview.photo
+        if scale >= 0.95 and photo.rgb.shape[:2] != (photo.height, photo.width):
+            # Queue out of a paint/resize callback; reaching 100% really loads source pixels.
+            self._full_loading = True
+            QTimer.singleShot(0, lambda: self._load_selected(full_resolution=True))
+
+    def set_view_mode(self, mode: str) -> None:
+        self.mode_buttons[mode].setChecked(True)
+        self.viewer.set_mode(mode)
+
+    def _format_changed(self) -> None:
+        jpeg = self.format_combo.currentData() == ".jpg"
+        self.depth_combo.setEnabled(not jpeg)
+        self.quality_spin.setEnabled(jpeg)
+        if jpeg:
+            self.depth_combo.setCurrentIndex(0)
+
+    def export_dialog(self) -> None:
+        if self.preview is None or not self.export_button.isEnabled():
+            return
+        suffix = self.format_combo.currentData()
+        source = self.preview.photo.path
+        name = source.with_name(source.stem + "_" + self.controls.settings().preset + suffix)
+        filters = {
+            ".jpg": "JPEG (*.jpg *.jpeg)",
+            ".png": "PNG (*.png)",
+            ".tiff": "TIFF (*.tiff *.tif)",
+        }
+        path, _selected = QFileDialog.getSaveFileName(
+            self, _("Экспорт фотографии"), str(name), filters[suffix]
+        )
+        if path:
+            destination = Path(path)
+            if not destination.suffix:
+                destination = destination.with_suffix(suffix)
+            self.start_export(destination)
+
+    def start_export(self, destination: Path) -> None:
+        if self.preview is None or self._export_job is not None:
+            return
+        self._debounce.stop()
+        self._cancel_view_job()
+        photo = self.preview.photo
+        analysis = self.preview.analysis
+        settings = self.controls.settings()
+        depth, quality = self.depth_combo.currentData(), self.quality_spin.value()
+        keep_gps = self.gps_check.isChecked()
+        self._status(_("Экспорт фотографии в исходном размере…"))
+
+        def operation(token, progress):
+            return export_photo(
+                photo.path,
+                destination,
+                settings,
+                analysis=analysis,
+                bit_depth=depth,
+                quality=quality,
+                keep_gps=keep_gps,
+                expected_signature=photo.stat_signature,
+                token=token,
+                progress=progress,
+            )
+
+        def success(report):
+            self.last_export = report
+            self._status(_("Сохранено: ") + str(destination))
+            if self.library.currentItem():
+                self.library.currentItem().setText(photo.path.name + "\n" + _("Экспортировано"))
+            self.export_completed.emit(report)
+
+        self._submit("export", operation, success)
+        self._update_actions()
+
+    def save_settings_dialog(self) -> None:
+        path, _selected = QFileDialog.getSaveFileName(
+            self, _("Сохранить настройки"), "freedive-preset.json", "JSON (*.json)"
+        )
+        if path:
+            try:
+                save_settings(Path(path).with_suffix(".json"), self.controls.settings())
+                self._status(_("Настройки сохранены"))
+            except StudioError as exc:
+                self._status(str(exc), error=True)
+
+    def load_settings_dialog(self) -> None:
+        path, _selected = QFileDialog.getOpenFileName(
+            self, _("Загрузить настройки"), "", "JSON (*.json)"
+        )
+        if path:
+            try:
+                self.controls.set_settings(load_settings(path))
+            except StudioError as exc:
+                self._status(str(exc), error=True)
+
+    def _submit(self, kind, operation, success) -> None:
+        self._counter += 1
+        identifier = self._counter
+        token = CancellationToken()
+        worker = Worker(identifier, operation, token)
+        worker.signals.succeeded.connect(self._succeeded)
+        worker.signals.failed.connect(self._failed)
+        worker.signals.progress.connect(self._progress)
+        worker.signals.finished.connect(self._finished)
+        self._jobs[identifier] = (worker, kind, success)
+        if kind == "view":
+            self._view_job = identifier
+        else:
+            self._export_job = identifier
+        self.progress_bar.setRange(0, 0)
+        self.cancel_button.show()
+        self.pool.start(worker)
+
+    def _is_current(self, identifier: int) -> bool:
+        return identifier in (self._view_job, self._export_job) and not self._closing
+
+    def _succeeded(self, identifier: int, result) -> None:
+        if self._is_current(identifier) and identifier in self._jobs:
+            self._jobs[identifier][2](result)
+
+    def _failed(self, identifier: int, message: str, cancelled: bool) -> None:
+        if not self._is_current(identifier):
+            return
+        self._render_pending = False
+        self._full_loading = False
+        if identifier == self._view_job and self.preview and self.rendered_settings:
+            self.controls.set_settings(self.rendered_settings, emit=False)
+            if self.library.currentItem():
+                self.library.currentItem().setData(SETTINGS_ROLE, self.rendered_settings.to_dict())
+        self._status(message, error=not cancelled)
+        if not cancelled:
+            self.operation_failed.emit(message)
+
+    def _progress(self, identifier: int, value: int, message: str) -> None:
+        if self._is_current(identifier):
+            self.progress_bar.setRange(0, 100)
+            self.progress_bar.setValue(value)
+            self._status(message)
+
+    def _finished(self, identifier: int) -> None:
+        if identifier == self._view_job:
+            self._view_job = None
+        if identifier == self._export_job:
+            self._export_job = None
+        self._jobs.pop(identifier, None)
+        if self._view_job is None and self._export_job is None:
+            self.cancel_button.hide()
+            self.progress_bar.setRange(0, 100)
+            self.progress_bar.setValue(0)
+        self._update_actions()
+
+    def cancel_operation(self) -> None:
+        was_waiting = self._debounce.isActive()
+        self._debounce.stop()
+        for identifier in (self._export_job, self._view_job):
+            if identifier in self._jobs:
+                self._jobs[identifier][0].token.cancel()
+        if was_waiting and self._view_job is None:
+            self._render_pending = False
+            if self.rendered_settings:
+                self.controls.set_settings(self.rendered_settings, emit=False)
+            self._update_actions()
+        self._status(_("Отмена…"))
+
+    def dragEnterEvent(self, event) -> None:
+        if event.mimeData().hasUrls() and self._export_job is None:
+            event.acceptProposedAction()
+
+    def dropEvent(self, event) -> None:
+        self.import_paths(
+            [Path(url.toLocalFile()) for url in event.mimeData().urls() if url.isLocalFile()]
+        )
+        event.acceptProposedAction()
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        self._closing = True
+        self._debounce.stop()
+        for worker, _kind, _success in self._jobs.values():
+            worker.token.cancel()
+        self.pool.waitForDone()
+        event.accept()
