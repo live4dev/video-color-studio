@@ -860,6 +860,11 @@ class MainWindow(QMainWindow):
     def _one_to_one(self) -> None:
         if self.preview is None:
             return
+        if self._video_playing:
+            self.stop_video_playback()
+            self._video_seek_position = self.video_frame_seconds
+            self._load_selected(full_resolution=True)
+            return
         photo = self.preview.photo
         if photo.rgb.shape[:2] != (photo.height, photo.width):
             self._load_selected(full_resolution=True)
@@ -1219,7 +1224,12 @@ class MainWindow(QMainWindow):
 
     def _zoom_changed(self, scale: float) -> None:
         self.zoom_label.setText(f"{scale * 100:.0f}%")
-        if self.preview is None or self._full_loading or self._export_job is not None:
+        if (
+            self.preview is None
+            or self._full_loading
+            or self._export_job is not None
+            or self._video_playing
+        ):
             return
         photo = self.preview.photo
         if scale >= 0.95 and photo.rgb.shape[:2] != (photo.height, photo.width):

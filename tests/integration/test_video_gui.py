@@ -123,9 +123,10 @@ def test_gui_video_seek_preview_playback_and_full_export(window, qtbot, video_fi
         lambda _before, _after, seconds: playback_frames.append(seconds)
     )
     qtbot.waitUntil(lambda: any(point > 0.3 for point in playback_frames), timeout=15_000)
-    window.toggle_video_playback()
+    window._one_to_one()
     qtbot.waitUntil(lambda: not window._video_playing, timeout=5_000)
     _ready(qtbot, window)
+    assert window.video_frame_seconds >= 0.3
 
     output = tmp_path / "full_export.mp4"
     _operation(
