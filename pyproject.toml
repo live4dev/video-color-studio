@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "freedive-color-studio"
-version = "0.3.0"
+version = "0.4.0"
 description = "Offline underwater photo and video grading for Windows and macOS"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
@@ -17,6 +17,7 @@ dependencies = [
   "tifffile>=2025.1.10",
   "av==15.1.0; sys_platform != 'win32'",
   "av==16.1.0; sys_platform == 'win32'",
+  "mcp==2.3.0",
 ]
 
 [project.optional-dependencies]
@@ -25,6 +26,7 @@ build = ["pyinstaller>=6.12,<7"]
 
 [project.scripts]
 freedive-color = "freedive_color.__main__:main"
+freedive-color-mcp = "freedive_color.control.mcp_server:main"
 
 [project.gui-scripts]
 freedive-color-studio = "freedive_color.ui.app:run"

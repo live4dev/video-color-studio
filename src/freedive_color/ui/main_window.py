@@ -4,7 +4,7 @@ import tempfile
 from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import QSignalBlocker, QSize, Qt, QThreadPool, QTimer, QUrl, Signal
+from PySide6.QtCore import QSignalBlocker, QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices, QIcon, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -37,7 +37,6 @@ from freedive_color.core.analyze import SceneAnalysis, analyze_scene
 from freedive_color.core.batch import export_batch
 from freedive_color.core.errors import StudioError
 from freedive_color.core.image_pipeline import (
-    CancellationToken,
     Preview,
     create_image_reference,
     export_photo,
@@ -48,21 +47,18 @@ from freedive_color.core.masks import BrushStroke, MaskEdits
 from freedive_color.core.media_io import PHOTO_EXTENSIONS, Photo, load_photo, signature
 from freedive_color.core.presets import GradeSettings, get_preset
 from freedive_color.core.project import load_settings, read_json, save_settings, sha256_file
-from freedive_color.core.reference import PaletteReference, create_reference
+from freedive_color.core.reference import create_reference
 from freedive_color.core.session import (
     ExportOptions,
-    Session,
     SessionItem,
-    load_session,
-    save_session,
 )
 
+from .controller_bridge import ControllerWindowMixin
 from .controls import GradeControls
 from .local_controls import LocalControls
 from .strings import _
 from .video_playback import VideoPlayback
 from .viewer import CompareViewer, to_qimage
-from .workers import Worker
 
 PATH_ROLE = Qt.ItemDataRole.UserRole
 SETTINGS_ROLE = Qt.ItemDataRole.UserRole + 1
@@ -75,7 +71,7 @@ VIDEO_EXTENSIONS = {".mp4", ".mov"}
 MEDIA_FILTER = "Фото и видео SDR (*.jpg *.jpeg *.png *.tif *.tiff *.mp4 *.mov)"
 
 
-class MainWindow(QMainWindow):
+class MainWindow(ControllerWindowMixin, QMainWindow):
     preview_ready = Signal()
     export_completed = Signal(object)
     batch_completed = Signal(object)
@@ -83,14 +79,20 @@ class MainWindow(QMainWindow):
     video_export_completed = Signal(object)
     operation_failed = Signal(str)
 
-    def __init__(self):
+    def __init__(self, controller=None, integration_mode: bool = False):
         super().__init__()
+        if controller is None:
+            from freedive_color.control.controller import ProjectController
+
+            controller = ProjectController(parent=self)
+        self.controller = controller
+        self.integration_mode = integration_mode
+        self._explicit_quit = False
         self.setWindowTitle("Freedive Color Studio")
         self.resize(1440, 920)
         self.setMinimumSize(1080, 720)
         self.setAcceptDrops(True)
-        self.pool = QThreadPool(self)
-        self.pool.setMaxThreadCount(1)
+        self.pool = controller.pool
         self.preview: Preview | None = None
         self.rendered_settings: GradeSettings | None = None
         self.last_export: dict | None = None
@@ -112,7 +114,7 @@ class MainWindow(QMainWindow):
         self._video_plan = None
         self._proxy_directories = []
         self._photo_export_suffix = ".jpg"
-        self._jobs: dict[int, tuple[Worker, str, object]] = {}
+        self._jobs: dict[int, tuple[object, str, object]] = {}
         self._counter = 0
         self._view_job: int | None = None
         self._export_job: int | None = None
@@ -125,6 +127,7 @@ class MainWindow(QMainWindow):
         self._debounce.timeout.connect(self._render)
         self._build_ui()
         self._build_menu()
+        self._attach_controller()
         self._update_actions()
 
     def _build_ui(self) -> None:
@@ -574,6 +577,7 @@ class MainWindow(QMainWindow):
             item.setCheckState(Qt.CheckState.Checked)
             item.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon))
             self.library.addItem(item)
+            self._sync_controller_item(item)
             existing.add(resolved)
             added.append(item)
         self.library_count.setText(_("Файлов: ") + str(self.library.count()))
@@ -597,6 +601,7 @@ class MainWindow(QMainWindow):
             self.video_preview_path = None
             self._video_plan = None
             self._video_seek_position = 0.0
+            self._sync_controller_selection()
             self.controls.set_settings(
                 GradeSettings.from_dict(current.data(SETTINGS_ROLE)), emit=False
             )
@@ -614,7 +619,10 @@ class MainWindow(QMainWindow):
 
     def _load_selected(self, full_resolution: bool = False) -> None:
         item = self.library.currentItem()
-        if item is None or self._export_job is not None:
+        if item is None:
+            return
+        if self._export_job is not None:
+            self._defer_controller_view()
             return
         self._debounce.stop()
         self._cancel_view_job()
@@ -808,7 +816,16 @@ class MainWindow(QMainWindow):
         self._update_actions()
 
     def _render(self) -> None:
-        if self.preview is None or self._export_job is not None:
+        if self._export_job is not None:
+            self._defer_controller_view()
+            return
+        if self.preview is None:
+            return
+        if (
+            self.video_info is not None
+            and abs(self.preview.timestamp - self._video_seek_position) > 0.001
+        ):
+            self._load_selected()
             return
         photo = self.preview.photo
         analysis = self.preview.analysis
@@ -976,6 +993,7 @@ class MainWindow(QMainWindow):
 
         def success(reference):
             self.reference, self.reference_path = reference, path.resolve()
+            self._sync_controller_options()
             self.local_controls.reference_label.setText(_("Эталон: ") + path.name)
             self._local_settings_changed(self.local_controls.settings())
 
@@ -984,6 +1002,7 @@ class MainWindow(QMainWindow):
 
     def clear_reference(self) -> None:
         self.reference, self.reference_path = None, None
+        self._sync_controller_options()
         self.local_controls.reference_label.setText(_("Эталон не выбран"))
         self._local_settings_changed(self.local_controls.settings())
 
@@ -1010,6 +1029,7 @@ class MainWindow(QMainWindow):
 
         def success(reference):
             self.reference, self.reference_path = reference, None
+            self._sync_controller_options()
             self.local_controls.reference_label.setText(_("Эталон кадра: ") + name)
             self._local_settings_changed(self.local_controls.settings())
 
@@ -1029,35 +1049,11 @@ class MainWindow(QMainWindow):
         )
 
     def _session_items(self) -> tuple[SessionItem, ...]:
-        records = []
-        for row in range(self.library.count()):
-            item = self.library.item(row)
-            info = item.data(INFO_ROLE) or {}
-            records.append(
-                SessionItem(
-                    Path(item.data(PATH_ROLE)),
-                    GradeSettings.from_dict(item.data(SETTINGS_ROLE)),
-                    item.checkState() == Qt.CheckState.Checked,
-                    item.data(LOCAL_ROLE) or {},
-                    item.data(MASK_ROLE) or {},
-                    item.data(ANALYSIS_ROLE),
-                    info,
-                    info.get("sha256"),
-                )
-            )
-        return tuple(records)
+        return self.controller.get_session().items
 
     def save_project(self, path: Path, overwrite: bool = False) -> None:
-        session = Session(
-            self._session_items(),
-            self.reference_path,
-            self.reference.to_dict() if self.reference else None,
-            self.temp_directory,
-            self.output_directory,
-            self._export_options(),
-            self.library.currentRow() if self.library.currentRow() >= 0 else None,
-        )
-        save_session(path, session, overwrite=overwrite)
+        self._sync_controller_options()
+        self.controller.save_project_from_ui(path, overwrite=overwrite)
         self.session_path = Path(path).resolve()
         self._status(_("Проект сохранён: ") + str(path))
 
@@ -1093,76 +1089,7 @@ class MainWindow(QMainWindow):
                 self._status(str(exc), error=True)
 
     def load_project(self, path: Path) -> None:
-        if self._export_job is not None:
-            return
-        session = load_session(path)
-        self.stop_video_playback()
-        self.video_info = None
-        self.video_preview_path = None
-        self._video_plan = None
-        self._configure_video_ui()
-        self._cancel_view_job()
-        self._debounce.stop()
-        self.preview = None
-        blocker = QSignalBlocker(self.library)
-        self.library.clear()
-        for record in session.items:
-            item = QListWidgetItem(record.path.name)
-            item.setData(PATH_ROLE, str(record.path))
-            item.setData(SETTINGS_ROLE, record.settings.to_dict())
-            item.setData(
-                LOCAL_ROLE,
-                record.local_settings
-                or LocalSettings(
-                    enabled=bool(
-                        record.mask_edits or session.reference_data or session.reference_path
-                    )
-                ).to_dict(),
-            )
-            item.setData(MASK_ROLE, record.mask_edits or MaskEdits().to_dict())
-            item.setData(ANALYSIS_ROLE, record.analysis)
-            item.setData(
-                INFO_ROLE,
-                {
-                    **record.media_info,
-                    **({"sha256": record.source_sha256} if record.source_sha256 else {}),
-                },
-            )
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(
-                Qt.CheckState.Checked if record.included else Qt.CheckState.Unchecked
-            )
-            item.setToolTip(str(record.path))
-            self.library.addItem(item)
-        del blocker
-        self.reference_path = session.reference_path
-        self.reference = (
-            PaletteReference.from_dict(session.reference_data) if session.reference_data else None
-        )
-        self.local_controls.reference_label.setText(
-            _("Эталон: ") + self.reference.source_name if self.reference else _("Эталон не выбран")
-        )
-        self.temp_directory, self.output_directory = (
-            session.temp_directory,
-            session.output_directory,
-        )
-        suffix = {".jpeg": ".jpg", ".tif": ".tiff"}.get(
-            session.export_options.suffix, session.export_options.suffix
-        )
-        self.format_combo.setCurrentIndex(self.format_combo.findData(suffix))
-        self.depth_combo.setCurrentIndex(
-            self.depth_combo.findData(session.export_options.bit_depth)
-        )
-        self.quality_spin.setValue(session.export_options.quality)
-        self.gps_check.setChecked(session.export_options.keep_gps and self.gps_check.isEnabled())
-        self.session_path = Path(path).resolve()
-        self.library_count.setText(_("Файлов: ") + str(self.library.count()))
-        if session.items:
-            self.library.setCurrentRow(session.selected_index or 0)
-        else:
-            self.viewer.clear()
-            self._render_pending = False
-            self._update_actions()
+        self._load_controller_project(path)
 
     def batch_export_dialog(self) -> None:
         path = QFileDialog.getExistingDirectory(
@@ -1179,6 +1106,7 @@ class MainWindow(QMainWindow):
         self._debounce.stop()
         self._render_pending = False
         self.output_directory = Path(directory).resolve()
+        self._sync_controller_options()
         temp_directory = self.temp_directory
 
         def operation(token, progress):
@@ -1219,7 +1147,21 @@ class MainWindow(QMainWindow):
             )
             self.batch_completed.emit(result)
 
-        self._submit("export", operation, success)
+        media_ids = [
+            self.controller.media_id_for_path(item.path) for item in items if item.included
+        ]
+        self._submit(
+            "export",
+            operation,
+            success,
+            media_ids=media_ids,
+            snapshot={
+                "directory": str(self.output_directory),
+                "export_options": options.to_dict(),
+                "temp_directory": str(temp_directory) if temp_directory else None,
+                "excluded_paths": [str(item.path) for item in items if not item.included],
+            },
+        )
         self._update_actions()
 
     def _zoom_changed(self, scale: float) -> None:
@@ -1251,6 +1193,8 @@ class MainWindow(QMainWindow):
         if jpeg or video:
             self.depth_combo.setCurrentIndex(0)
         self._depth_changed()
+        if hasattr(self, "_syncing_controller"):
+            self._sync_controller_options()
 
     def _depth_changed(self) -> None:
         limited_metadata = (
@@ -1344,8 +1288,11 @@ class MainWindow(QMainWindow):
         def success(report):
             self.last_export = report
             self._status(_("Сохранено: ") + str(destination))
-            if self.library.currentItem():
-                self.library.currentItem().setText(photo.path.name + "\n" + _("Экспортировано"))
+            for row in range(self.library.count()):
+                item = self.library.item(row)
+                if Path(item.data(PATH_ROLE)) == photo.path:
+                    item.setText(photo.path.name + "\n" + _("Экспортировано"))
+                    break
             self.export_completed.emit(report)
 
         self._submit("export", operation, success)
@@ -1384,23 +1331,10 @@ class MainWindow(QMainWindow):
             except StudioError as exc:
                 self._status(str(exc), error=True)
 
-    def _submit(self, kind, operation, success) -> None:
-        self._counter += 1
-        identifier = self._counter
-        token = CancellationToken()
-        worker = Worker(identifier, operation, token)
-        worker.signals.succeeded.connect(self._succeeded)
-        worker.signals.failed.connect(self._failed)
-        worker.signals.progress.connect(self._progress)
-        worker.signals.finished.connect(self._finished)
-        self._jobs[identifier] = (worker, kind, success)
-        if kind == "view":
-            self._view_job = identifier
-        else:
-            self._export_job = identifier
-        self.progress_bar.setRange(0, 0)
-        self.cancel_button.show()
-        self.pool.start(worker)
+    def _submit(self, kind, operation, success, *, media_ids=None, snapshot=None) -> None:
+        self._submit_controller_job(
+            kind, operation, success, media_ids=media_ids, snapshot=snapshot
+        )
 
     def _is_current(self, identifier: int) -> bool:
         return identifier in (self._view_job, self._export_job) and not self._closing
@@ -1447,6 +1381,8 @@ class MainWindow(QMainWindow):
             self.progress_bar.setValue(0)
         self._update_actions()
 
+        self._resume_controller_view()
+
     def cancel_operation(self) -> None:
         was_waiting = self._debounce.isActive()
         self._debounce.stop()
@@ -1478,6 +1414,7 @@ class MainWindow(QMainWindow):
         )
         if path:
             self.temp_directory = Path(path).resolve()
+            self._sync_controller_options()
             self._status(_("Временные файлы: ") + str(self.temp_directory))
 
     def _configure_video_ui(self) -> None:
@@ -1539,18 +1476,23 @@ class MainWindow(QMainWindow):
             0, min(float(seconds), max(0, float(self.video_info.duration) - 0.001))
         )
         self.video_start_spin.setValue(self._video_seek_position)
+        self._sync_controller_selection()
         self._load_selected()
 
     def _remember_video_plan(self, report: dict) -> None:
         if report.get("plan"):
             from freedive_color.core.temporal import ShotPlan
 
-            self._video_plan = ShotPlan.from_dict(report["plan"])
-            item = self.library.currentItem()
-            if item is not None:
-                item.setData(
-                    INFO_ROLE, {**(item.data(INFO_ROLE) or {}), "shot_plan": report["plan"]}
-                )
+            source = Path(report.get("source", {}).get("path", "")).resolve()
+            for row in range(self.library.count()):
+                item = self.library.item(row)
+                if Path(item.data(PATH_ROLE)).resolve() == source:
+                    if item is self.library.currentItem():
+                        self._video_plan = ShotPlan.from_dict(report["plan"])
+                    item.setData(
+                        INFO_ROLE, {**(item.data(INFO_ROLE) or {}), "shot_plan": report["plan"]}
+                    )
+                    break
 
     def create_video_preview(
         self, start_seconds: float, duration_seconds: float, destination: Path | None = None
@@ -1692,11 +1634,14 @@ class MainWindow(QMainWindow):
             self.preview.photo.path, self.video_preview_path, self.video_preview_start, self
         )
         self.video_playback = player
+        source_media_id = self.controller.media_id_for_path(self.preview.photo.path)
 
         def frame_ready(before, after, seconds):
             try:
                 if self.video_playback is player and self._video_playing and not self._closing:
                     self.video_frame_seconds = seconds
+                    self._video_seek_position = seconds
+                    self.controller.update_view_position(source_media_id, seconds)
                     self.viewer.set_mask_overlay(None)
                     self.viewer.set_images(
                         to_qimage(before), to_qimage(after), self.video_info.width
@@ -1749,11 +1694,17 @@ class MainWindow(QMainWindow):
         event.acceptProposedAction()
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        if self.integration_mode and not self._explicit_quit:
+            self.stop_video_playback()
+            self.hide()
+            event.ignore()
+            return
         self._closing = True
         self.stop_video_playback()
         self._debounce.stop()
         for worker, _kind, _success in self._jobs.values():
             worker.token.cancel()
+        self.controller.shutdown()
         self.pool.waitForDone()
         sources = [
             Path(self.library.item(index).data(PATH_ROLE)).resolve()

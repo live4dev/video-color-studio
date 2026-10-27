@@ -4,6 +4,10 @@ import sys
 def main() -> int:
     arguments = sys.argv[1:]
     flags = {argument.split("=", 1)[0] for argument in arguments}
+    if "--mcp" in flags:
+        from .control.mcp_server import main
+
+        return main()
     if "--smoke-video" in flags:
         from .video_smoke import run
 
