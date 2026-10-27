@@ -1,0 +1,42 @@
+name: Desktop tests and photo-MVP bundles
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: macos-15
+            target: aarch64-apple-darwin
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    env:
+      QT_QPA_PLATFORM: offscreen
+      MACOSX_DEPLOYMENT_TARGET: '13.0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --frozen --python-platform ${{ matrix.target }} --extra dev --extra build
+      - run: uv run --no-sync ruff check .
+      - run: uv run --no-sync ruff format --check .
+      - run: uv run --no-sync pytest -q --junitxml=artifacts/tests.xml
+      - run: uv run --no-sync python tools/generate_fixtures.py
+      - run: uv run --no-sync python tools/build_desktop.py
+      - run: uv run --no-sync python tools/smoke_bundle.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: photo-mvp-${{ matrix.os }}
+          path: |
+            dist/*.zip
+            artifacts/

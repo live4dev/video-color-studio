@@ -1,0 +1,64 @@
+{
+  "date": "2026-10-27",
+  "milestone": "A",
+  "tests": {
+    "name": "pytest",
+    "errors": "0",
+    "failures": "0",
+    "skipped": "0",
+    "tests": "83",
+    "time": "15.764",
+    "timestamp": "2026-10-27T16:19:08.326807+05:00",
+    "hostname": "airbook.local"
+  },
+  "versions": {
+    "pyside6-essentials": "6.8.3",
+    "numpy": "2.5.4",
+    "opencv-python-headless": "4.14.0.94",
+    "pillow": "13.0.0",
+    "tifffile": "2026.10.15",
+    "pyinstaller": "6.22.3",
+    "pytest": "9.1.1",
+    "ruff": "0.17.3"
+  },
+  "real_photo": {
+    "path": "tests/fixtures/freediver_moalboal.jpg",
+    "sha256": "771ad767283bb15f5fd47c7c5a3960219b802601f73193ab22f9ad0ec5b2005b",
+    "source_unchanged": true
+  },
+  "standalone_gui": {
+    "passed": true,
+    "network_denied": true,
+    "controls": {
+      "preset": "natural",
+      "exposure": 0.15
+    },
+    "output_dimensions": [
+      1125,
+      1500
+    ]
+  },
+  "macos_target_audit": {
+    "checked_macho_files": 161,
+    "violations": [],
+    "runtime_on_macos13_tested": false
+  },
+  "zip": {
+    "path": "dist/Freedive-Color-Studio-macOS-arm64.zip",
+    "bytes": 89550683,
+    "sha256": "2f079519b881383b1af66634776dd82ee95cd17b4b00ad65b6cc2d6dfe949346",
+    "crc_integrity": "passed"
+  },
+  "benchmark": {
+    "dimensions": [
+      6000,
+      4000
+    ],
+    "preview_seconds": 0.3975417921319604,
+    "export_seconds": 3.259,
+    "peak_rss_mib": 2495.765625
+  },
+  "windows_tested": false,
+  "intel_macos_tested": false,
+  "clean_machine_tested": false
+}
