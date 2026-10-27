@@ -1,0 +1,30 @@
+[
+  {
+    "name": "numpy-openblas-code",
+    "version": "0.3.34.106.0",
+    "license": "BSD-3-Clause",
+    "source_commit": "446c436e10450c348169808f1a6b3fae0925c9f7",
+    "source_tree": "2e66afc39be41148ccc6c024a8b737572fc0a4ff",
+    "urls": [
+      "https://github.com/OpenMathLib/OpenBLAS/tree/446c436e10450c348169808f1a6b3fae0925c9f7",
+      "https://codeload.github.com/OpenMathLib/OpenBLAS/tar.gz/446c436e10450c348169808f1a6b3fae0925c9f7"
+    ],
+    "access": "Complete exact source commit and original producer preserved; unmodified permissive native component. Source available from identified third-party server."
+  },
+  {
+    "name": "numpy-macos-gnu-runtimes",
+    "version": "gcc-11.3.0-2",
+    "platforms": [
+      "macos-arm64"
+    ],
+    "license": "GPL-3.0-with-GCC-exception; libquadmath LGPL-2.1-or-later",
+    "source_commit": "2d280e7eafc086e9df85f50ed1a6526d6a3a204d",
+    "urls": [
+      "https://github.com/isuruf/gcc/tree/2d280e7eafc086e9df85f50ed1a6526d6a3a204d/libgfortran",
+      "https://github.com/isuruf/gcc/tree/2d280e7eafc086e9df85f50ed1a6526d6a3a204d/libquadmath",
+      "https://github.com/isuruf/gcc/tree/2d280e7eafc086e9df85f50ed1a6526d6a3a204d/libgcc",
+      "https://codeload.github.com/isuruf/gcc/tar.gz/2d280e7eafc086e9df85f50ed1a6526d6a3a204d"
+    ],
+    "access": "Full matching GCC11.3.0 source commit; original gfortran11.3.0-2 producer/binary checksums and all runtime licenses in included OpenBLAS producer. Shared replaceable runtimes; no compiler-source bytes represented as bundled."
+  }
+]

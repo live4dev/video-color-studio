@@ -1,0 +1,46 @@
+[
+  {
+    "name": "python-numpy",
+    "version": "2.5.4",
+    "filename": "numpy-2.5.4.tar.gz",
+    "sha256": "9a94cf751c9ad8ebaa835bcd3d40dacf8534ad086b88c38029b65123c7999d2a",
+    "urls": [
+      "https://files.pythonhosted.org/packages/95/b0/c7453d0b6e2073c3264468b106ee1563750cecc910965e67357e3698c83e/numpy-2.5.4.tar.gz"
+    ],
+    "role": "Exact locked source release and build files; unmodified upstream component",
+    "license": "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0"
+  },
+  {
+    "name": "python-pillow",
+    "version": "13.0.0",
+    "filename": "pillow-13.0.0.tar.gz",
+    "sha256": "cdcd1ba258178f7356d74170c9a81ba4eab6a5d55748bc402a5a2a6fe6be3510",
+    "urls": [
+      "https://files.pythonhosted.org/packages/ce/a4/9cc30690a394a8305e8be4c9036aa16d0dfddadd09079860b582f562496d/pillow-13.0.0.tar.gz"
+    ],
+    "role": "Exact locked source release and build files; unmodified upstream component",
+    "license": "MIT-CMU"
+  },
+  {
+    "name": "python-tifffile",
+    "version": "2026.10.15",
+    "filename": "tifffile-2026.10.15.tar.gz",
+    "sha256": "a5ee666dbd6d62e059830a3450825a2521a981b3f45c07a80ab009484aef56f0",
+    "urls": [
+      "https://files.pythonhosted.org/packages/fd/87/a982ca5b892579397c2b155275cc0119b51feb1701eaefa18acb0245f0a4/tifffile-2026.10.15.tar.gz"
+    ],
+    "role": "Exact locked source release and build files; unmodified upstream component",
+    "license": "BSD-3-Clause"
+  },
+  {
+    "name": "python-pyinstaller",
+    "version": "6.22.3",
+    "filename": "pyinstaller-6.22.3.tar.gz",
+    "sha256": "05eb2f5615503e72939a7224d68b4aff572c6b0438ee4a17d0a4b481f399362d",
+    "urls": [
+      "https://files.pythonhosted.org/packages/63/41/f90302845945abd4ed647933ff5ee7c6ac93983187be67f897b6cb613331/pyinstaller-6.22.3.tar.gz"
+    ],
+    "role": "Exact locked source release and build files; unmodified upstream component",
+    "license": "GPLv2-or-later with a special exception which allows to use PyInstaller to build and distribute non-free programs (including commercial ones)"
+  }
+]

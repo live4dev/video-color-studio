@@ -1,4 +1,4 @@
-name: Desktop tests and photo-MVP bundles
+name: Desktop photo-video tests and standalone packages
 on:
   push:
   pull_request:
@@ -11,13 +11,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: windows-latest
+          - os: windows-2022
             target: x86_64-pc-windows-msvc
           - os: macos-15
             target: aarch64-apple-darwin
           - os: macos-15-intel
             target: x86_64-apple-darwin
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 180
     env:
       QT_QPA_PLATFORM: offscreen
       MACOSX_DEPLOYMENT_TARGET: '13.0'
@@ -27,16 +28,26 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --frozen --python-platform ${{ matrix.target }} --extra dev --extra build
+      - name: Build image-only OpenCV for macOS
+        if: runner.os == 'macOS'
+        run: uv run --no-sync python tools/build_image_opencv.py --jobs 2 --install
       - run: uv run --no-sync ruff check .
       - run: uv run --no-sync ruff format --check .
       - run: uv run --no-sync pytest -q --junitxml=artifacts/tests.xml
       - run: uv run --no-sync python tools/generate_fixtures.py
       - run: uv run --no-sync python tools/build_desktop.py
-      - run: uv run --no-sync python tools/smoke_bundle.py
+      - name: Install and check the actual macOS archive
+        if: runner.os == 'macOS'
+        shell: bash
+        run: uv run --no-sync python tools/install_smoke.py --archive "dist/Freedive-Color-Studio-macOS-$(uname -m).zip"
+      - name: Install and check the actual Windows archive
+        if: runner.os == 'Windows'
+        run: uv run --no-sync python tools/install_smoke.py --archive dist/Freedive_Color_Studio_Windows_x64_UNTESTED.zip
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: photo-mvp-${{ matrix.os }}
+          name: freedive-color-studio-${{ matrix.os }}
           path: |
             dist/*.zip
+            dist/*.json
             artifacts/

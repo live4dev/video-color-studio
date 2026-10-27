@@ -1,11 +1,14 @@
 # PyInstaller standalone directory: shared libraries remain replaceable for LGPL compliance.
 import sys
+import tomllib
 from pathlib import Path
 
 root = Path(SPECPATH).parent
+version = tomllib.loads((root / "pyproject.toml").read_text())["project"]["version"]
 data = [(str(root / filename), "licenses") for filename in
-        ("LICENSE", "THIRD_PARTY_LICENSES.md", "README.md")]
+        ("LICENSE", "THIRD_PARTY_LICENSES.md", "README.md", "TESTING.md", "MILESTONES.md", "DECISIONS.md")]
 data.append((str(root / "build" / "licenses"), "licenses/dependencies"))
+data.append((str(root / "src" / "freedive_color" / "assets"), "freedive_color/assets"))
 analysis = Analysis(
     [str(root / "packaging" / "launcher.py")],
     pathex=[str(root / "src")],
@@ -27,7 +30,7 @@ if sys.platform == "darwin":
         collected, name="Freedive Color Studio.app",
         bundle_identifier="dev.live4.freedive-color-studio",
         info_plist={
-            "CFBundleShortVersionString": "0.1.0", "CFBundleVersion": "0.1.0",
+            "CFBundleShortVersionString": version, "CFBundleVersion": version,
             "LSMinimumSystemVersion": "13.0", "NSHighResolutionCapable": True,
             "LSApplicationCategoryType": "public.app-category.photography",
         },

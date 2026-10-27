@@ -14,6 +14,7 @@ DISTRIBUTIONS = (
     "PySide6-Essentials",
     "shiboken6",
     "tifffile",
+    "av",
     "pyinstaller",
 )
 
@@ -51,6 +52,20 @@ def collect(destination: Path) -> None:
             "CPython license not found in this runtime; supply it before distribution."
         )
     shutil.copyfile(runtime_license, destination / "PYTHON_LICENSE.txt")
+    root = Path(__file__).resolve().parents[1]
+    for directory, name in (
+        (root / "build/media-sources/notices", "native-media"),
+        (root / "build/opencv-image-only/notices", "native-opencv"),
+    ):
+        if directory.is_dir():
+            shutil.copytree(directory, destination / name)
+    for source in (
+        root / "build/media-sources/source-manifest.json",
+        root / "build/opencv-image-only/native-manifest.json",
+        root / "packaging/media/NOTICE.md",
+    ):
+        if source.is_file():
+            shutil.copyfile(source, destination / source.name)
     (destination / "manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
     )

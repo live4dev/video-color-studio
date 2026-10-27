@@ -1,0 +1,147 @@
+{
+  "av_version": "15.1.0",
+  "vendor_ref": "7.1.1-6",
+  "recipe_url": "https://github.com/PyAV-Org/pyav-ffmpeg/blob/7.1.1-6/scripts/build-ffmpeg.py",
+  "patch_url": "https://github.com/PyAV-Org/pyav-ffmpeg/blob/7.1.1-6/patches/ffmpeg.patch",
+  "pyav_recipe_url": "https://github.com/PyAV-Org/PyAV/blob/v15.1.0/scripts/ffmpeg-7.1.json",
+  "all_recipe_packages_not_all_runtime_libraries": [
+    {
+      "name": "alsa-lib",
+      "source_url": "https://www.alsa-project.org/files/pub/lib/alsa-lib-1.2.14.tar.bz2",
+      "sha256": "be9c88a0b3604367dd74167a2b754a35e142f670292ae47a2fdef27a2ee97a32"
+    },
+    {
+      "name": "nv-codec-headers",
+      "source_url": "https://github.com/FFmpeg/nv-codec-headers/archive/refs/tags/n13.0.19.0.tar.gz",
+      "sha256": "86d15d1a7c0ac73a0eafdfc57bebfeba7da8264595bf531cf4d8db1c22940116"
+    },
+    {
+      "name": "ffmpeg",
+      "source_url": "https://ffmpeg.org/releases/ffmpeg-7.1.1.tar.xz",
+      "sha256": "733984395e0dbbe5c046abda2dc49a5544e7e0e1e2366bba849222ae9e3a03b1"
+    },
+    {
+      "name": "gmp",
+      "source_url": "https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.xz",
+      "sha256": "a3c2b80201b89e68616f4ad30bc66aee4927c3ce50e33929ca819d5c43538898"
+    },
+    {
+      "name": "unistring",
+      "source_url": "https://ftp.gnu.org/gnu/libunistring/libunistring-1.3.tar.gz",
+      "sha256": "8ea8ccf86c09dd801c8cac19878e804e54f707cf69884371130d20bde68386b7"
+    },
+    {
+      "name": "nettle",
+      "source_url": "https://ftp.gnu.org/gnu/nettle/nettle-3.10.1.tar.gz",
+      "sha256": "b0fcdd7fc0cdea6e80dcf1dd85ba794af0d5b4a57e26397eee3bc193272d9132"
+    },
+    {
+      "name": "gnutls",
+      "source_url": "https://www.gnupg.org/ftp/gcrypt/gnutls/v3.8/gnutls-3.8.9.tar.xz",
+      "sha256": "69e113d802d1670c4d5ac1b99040b1f2d5c7c05daec5003813c049b5184820ed"
+    },
+    {
+      "name": "aom",
+      "source_url": "https://storage.googleapis.com/aom-releases/libaom-3.11.0.tar.gz",
+      "sha256": "cf7d103d2798e512aca9c6e7353d7ebf8967ee96fffe9946e015bb9947903e3e"
+    },
+    {
+      "name": "dav1d",
+      "source_url": "https://code.videolan.org/videolan/dav1d/-/archive/1.5.1/dav1d-1.5.1.tar.bz2",
+      "sha256": "4eddffd108f098e307b93c9da57b6125224dc5877b1b3d157b31be6ae8f1f093"
+    },
+    {
+      "name": "libsvtav1",
+      "source_url": "https://gitlab.com/AOMediaCodec/SVT-AV1/-/archive/v3.0.1/SVT-AV1-v3.0.1.tar.bz2",
+      "sha256": "f1d1ad8db551cd84ab52ae579b0e5086d8a0b7e47aea440e75907242a51b4cb9"
+    },
+    {
+      "name": "lame",
+      "source_url": "http://deb.debian.org/debian/pool/main/l/lame/lame_3.100.orig.tar.gz",
+      "sha256": "ddfe36cab873794038ae2c1210557ad34857a4b6bdc515785d1da9e175b1da1e"
+    },
+    {
+      "name": "ogg",
+      "source_url": "http://downloads.xiph.org/releases/ogg/libogg-1.3.5.tar.gz",
+      "sha256": "0eb4b4b9420a0f51db142ba3f9c64b333f826532dc0f48c6410ae51f4799b664"
+    },
+    {
+      "name": "opus",
+      "source_url": "https://github.com/xiph/opus/releases/download/v1.5.2/opus-1.5.2.tar.gz",
+      "sha256": "65c1d2f78b9f2fb20082c38cbe47c951ad5839345876e46941612ee87f9a7ce1"
+    },
+    {
+      "name": "speex",
+      "source_url": "http://downloads.xiph.org/releases/speex/speex-1.2.1.tar.gz",
+      "sha256": "4b44d4f2b38a370a2d98a78329fefc56a0cf93d1c1be70029217baae6628feea"
+    },
+    {
+      "name": "twolame",
+      "source_url": "http://deb.debian.org/debian/pool/main/t/twolame/twolame_0.4.0.orig.tar.gz",
+      "sha256": "cc35424f6019a88c6f52570b63e1baf50f62963a3eac52a03a800bb070d7c87d"
+    },
+    {
+      "name": "vorbis",
+      "source_url": "https://ftp.osuosl.org/pub/xiph/releases/vorbis/libvorbis-1.3.7.tar.xz",
+      "sha256": "b33cc4934322bcbf6efcbacf49e3ca01aadbea4114ec9589d1b1e9d20f72954b"
+    },
+    {
+      "name": "vpx",
+      "source_url": "https://github.com/webmproject/libvpx/archive/v1.15.1.tar.gz",
+      "sha256": "6cba661b22a552bad729bd2b52df5f0d57d14b9789219d46d38f73c821d3a990",
+      "source_filename": "vpx-1.15.1.tar.gz"
+    },
+    {
+      "name": "png",
+      "source_url": "https://download.sourceforge.net/libpng/libpng-1.6.47.tar.gz",
+      "sha256": "084115c62fe023e3d88cd78764a4d8e89763985ee4b4a085825f7a00d85eafbb"
+    },
+    {
+      "name": "webp",
+      "source_url": "https://github.com/webmproject/libwebp/archive/refs/tags/v1.5.0.tar.gz",
+      "sha256": "668c9aba45565e24c27e17f7aaf7060a399f7f31dba6c97a044e1feacb930f37",
+      "source_filename": "webp-1.5.0.tar.gz"
+    },
+    {
+      "name": "openh264",
+      "source_url": "https://github.com/cisco/openh264/archive/refs/tags/v2.6.0.tar.gz",
+      "sha256": "558544ad358283a7ab2930d69a9ceddf913f4a51ee9bf1bfb9e377322af81a69",
+      "source_filename": "openh264-2.6.0.tar.gz"
+    },
+    {
+      "name": "fdk_aac",
+      "source_url": "https://github.com/mstorsjo/fdk-aac/archive/refs/tags/v2.0.3.tar.gz",
+      "sha256": "e25671cd96b10bad896aa42ab91a695a9e573395262baed4e4a2ff178d6a3a78"
+    },
+    {
+      "name": "opencore-amr",
+      "source_url": "http://deb.debian.org/debian/pool/main/o/opencore-amr/opencore-amr_0.1.5.orig.tar.gz",
+      "sha256": "2c006cb9d5f651bfb5e60156dbff6af3c9d35c7bbcc9015308c0aff1e14cd341"
+    },
+    {
+      "name": "x264",
+      "source_url": "https://code.videolan.org/videolan/x264/-/archive/32c3b801191522961102d4bea292cdb61068d0dd/x264-32c3b801191522961102d4bea292cdb61068d0dd.tar.bz2",
+      "sha256": "d7748f350127cea138ad97479c385c9a35a6f8527bc6ef7a52236777cf30b839"
+    },
+    {
+      "name": "x265",
+      "source_url": "https://bitbucket.org/multicoreware/x265_git/downloads/x265_4.1.tar.gz",
+      "sha256": "a31699c6a89806b74b0151e5e6a7df65de4b49050482fe5ebf8a4379d7af8f29"
+    },
+    {
+      "name": "srt",
+      "source_url": "https://github.com/Haivision/srt/archive/refs/tags/v1.5.4.tar.gz",
+      "sha256": "d0a8b600fe1b4eaaf6277530e3cfc8f15b8ce4035f16af4a5eb5d4b123640cdd"
+    },
+    {
+      "name": "gperf",
+      "source_url": "http://ftp.gnu.org/pub/gnu/gperf/gperf-3.1.tar.gz",
+      "sha256": "588546b945bba4b70b6a3a616e80b4ab466e3f33024a352fc2198112cdbb3ae2"
+    },
+    {
+      "name": "nasm",
+      "source_url": "https://www.nasm.us/pub/nasm/releasebuilds/2.14.02/nasm-2.14.02.tar.bz2",
+      "sha256": "34fd26c70a277a9fdd54cb5ecf389badedaf48047b269d1008fbc819b24e80bc"
+    }
+  ]
+}

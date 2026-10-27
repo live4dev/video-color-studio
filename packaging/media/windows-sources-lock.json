@@ -1,0 +1,780 @@
+{
+  "provenance": {
+    "platform": "windows-x64",
+    "pyav_version": "16.1.0",
+    "pyav_commit": "bae50fa636afc1e5fd4ede2961c824aaa9a5a81d",
+    "vendor_tag": "8.0.1-3",
+    "vendor_commit": "9e63121cf6ef9bc1744956c7a4cb772589c80806",
+    "ffmpeg_version": "8.0.1",
+    "recipe_url": "https://github.com/PyAV-Org/pyav-ffmpeg/blob/8.0.1-3/scripts/build-ffmpeg.py",
+    "patch_url": "https://github.com/PyAV-Org/pyav-ffmpeg/blob/8.0.1-3/patches/ffmpeg.patch",
+    "scope": "Exact Windows official AV16.1 producer; excludes Linux-only GMP, GnuTLS, nettle, unistring and ALSA",
+    "license_caveat": "Vendor patch removes libx264/libx265 GPL guards. Their original licenses remain. The combined standalone distribution is under GPLv3; own app source retains MIT.",
+    "source_access_policy": "Included archives are SHA-verified. Separate exact third-party source-access records are explicit and not represented as bundled archive bytes. Unmodified interpreters/system runtimes retain their own licenses."
+  },
+  "sources": [
+    {
+      "name": "nv-codec-headers",
+      "filename": "n13.0.19.0.tar.gz",
+      "sha256": "86d15d1a7c0ac73a0eafdfc57bebfeba7da8264595bf531cf4d8db1c22940116",
+      "urls": [
+        "https://github.com/FFmpeg/nv-codec-headers/archive/refs/tags/n13.0.19.0.tar.gz"
+      ],
+      "role": "Matching PyAV Windows producer8.0.1-3 codec/build dependency; unmodified upstream archive"
+    },
+    {
+      "name": "amf-headers",
+      "filename": "AMF-headers-v1.5.0.tar.gz",
+      "sha256": "d569647fa26f289affe81a206259fa92f819d06db1e80cc334559953e82a3f01",
+      "urls": [
+        "https://github.com/GPUOpen-LibrariesAndSDKs/AMF/releases/download/v1.5.0/AMF-headers-v1.5.0.tar.gz"
+      ],
+      "role": "Matching PyAV Windows producer8.0.1-3 codec/build dependency; unmodified upstream archive"
+    },
+    {
+      "name": "libvpl",
+      "filename": "v2.16.0.tar.gz",
+      "sha256": "d60931937426130ddad9f1975c010543f0da99e67edb1c6070656b7947f633b6",
+      "urls": [
+        "https://github.com/intel/libvpl/archive/refs/tags/v2.16.0.tar.gz"
+      ],
+      "role": "Matching PyAV Windows producer8.0.1-3 codec/build dependency; unmodified upstream archive"
+    },
+    {
+      "name": "ffmpeg",
+      "filename": "ffmpeg-8.0.1.tar.xz",
+      "sha256": "05ee0b03119b45c0bdb4df654b96802e909e0a752f72e4fe3794f487229e5a41",
+      "urls": [
+        "https://mirrors.omnios.org/ffmpeg/ffmpeg-8.0.1.tar.xz",
+        "https://mirror.umd.edu/xbmc/build-deps/sources/ffmpeg-8.0.1.tar.xz",
+        "https://ffmpeg.org/releases/ffmpeg-8.0.1.tar.xz"
+      ],
+      "role": "Matching PyAV Windows producer8.0.1-3 codec/build dependency; unmodified upstream archive"
+    },
+    {
+      "name": "lame",
+      "filename": "lame_3.100.orig.tar.gz",
+      "sha256": "ddfe36cab873794038ae2c1210557ad34857a4b6bdc515785d1da9e175b1da1e",
+      "urls": [
+        "https://deb.debian.org/debian/pool/main/l/lame/lame_3.100.orig.tar.gz"
+      ],
+      "role": "Matching PyAV Windows producer8.0.1-3 codec/build dependency; unmodified upstream archive"
+    },
+    {
+      "name": "ogg",
+      "filename": "libogg-1.3.6.tar.gz",
+      "sha256": "83e6704730683d004d20e21b8f7f55dcb3383cdf84c0daedf30bde175f774638",
+      "urls": [
+        "https://downloads.xiph.org/releases/ogg/libogg-1.3.6.tar.gz"
+      ],
+      "role": "Matching PyAV Windows producer8.0.1-3 codec/build dependency; unmodified upstream archive"
+    },
+    {
+      "name": "opus",
+      "filename": "opus-1.6.tar.gz",
+      "sha256": "b7637334527201fdfd6dd6a02e67aceffb0e5e60155bbd89175647a80301c92c",
+      "urls": [
+        "https://ftp.osuosl.org/pub/xiph/releases/opus/opus-1.6.tar.gz"
+      ],
+      "role": "Matching PyAV Windows producer8.0.1-3 codec/build dependency; unmodified upstream archive"
+    },
+    {
+      "name": "speex",
+      "filename": "speex-1.2.1.tar.gz",
+      "sha256": "4b44d4f2b38a370a2d98a78329fefc56a0cf93d1c1be70029217baae6628feea",
+      "urls": [
+        "https://downloads.xiph.org/releases/speex/speex-1.2.1.tar.gz"
+      ],
+      "role": "Matching PyAV Windows producer8.0.1-3 codec/build dependency; unmodified upstream archive"
+    },
+    {
+      "name": "vorbis",
+      "filename": "libvorbis-1.3.7.tar.xz",
+      "sha256": "b33cc4934322bcbf6efcbacf49e3ca01aadbea4114ec9589d1b1e9d20f72954b",
+      "urls": [
+        "https://ftp.osuosl.org/pub/xiph/releases/vorbis/libvorbis-1.3.7.tar.xz"
+      ],
+      "role": "Matching PyAV Windows producer8.0.1-3 codec/build dependency; unmodified upstream archive"
+    },
+    {
+      "name": "aom",
+      "filename": "libaom-3.13.1.tar.gz",
+      "sha256": "19e45a5a7192d690565229983dad900e76b513a02306c12053fb9a262cbeca7d",
+      "urls": [
+        "https://storage.googleapis.com/aom-releases/libaom-3.13.1.tar.gz"
+      ],
+      "role": "Matching PyAV Windows producer8.0.1-3 codec/build dependency; unmodified upstream archive"
+    },
+    {
+      "name": "dav1d",
+      "filename": "dav1d-1.5.3.tar.bz2",
+      "sha256": "e099f53253f6c247580c554d53a13f1040638f2066edc3c740e4c2f15174ce22",
+      "urls": [
+        "https://code.videolan.org/videolan/dav1d/-/archive/1.5.3/dav1d-1.5.3.tar.bz2"
+      ],
+      "role": "Matching PyAV Windows producer8.0.1-3 codec/build dependency; unmodified upstream archive"
+    },
+    {
+      "name": "libsvtav1",
+      "filename": "SVT-AV1-v3.1.2.tar.bz2",
+      "sha256": "802e9bb2b14f66e8c638f54857ccb84d3536144b0ae18b9f568bbf2314d2de88",
+      "urls": [
+        "https://gitlab.com/AOMediaCodec/SVT-AV1/-/archive/v3.1.2/SVT-AV1-v3.1.2.tar.bz2"
+      ],
+      "role": "Matching PyAV Windows producer8.0.1-3 codec/build dependency; unmodified upstream archive"
+    },
+    {
+      "name": "vpx",
+      "filename": "vpx-1.15.2.tar.gz",
+      "sha256": "26fcd3db88045dee380e581862a6ef106f49b74b6396ee95c2993a260b4636aa",
+      "urls": [
+        "https://github.com/webmproject/libvpx/archive/refs/tags/v1.15.2.tar.gz"
+      ],
+      "role": "Matching PyAV Windows producer8.0.1-3 codec/build dependency; unmodified upstream archive"
+    },
+    {
+      "name": "png",
+      "filename": "libpng-1.6.53.tar.xz",
+      "sha256": "1d3fb8ccc2932d04aa3663e22ef5ef490244370f4e568d7850165068778d98d4",
+      "urls": [
+        "https://downloads.sourceforge.net/project/libpng/libpng16/1.6.53/libpng-1.6.53.tar.xz"
+      ],
+      "role": "Matching PyAV Windows producer8.0.1-3 codec/build dependency; unmodified upstream archive"
+    },
+    {
+      "name": "webp",
+      "filename": "webp-1.5.0.tar.gz",
+      "sha256": "668c9aba45565e24c27e17f7aaf7060a399f7f31dba6c97a044e1feacb930f37",
+      "urls": [
+        "https://github.com/webmproject/libwebp/archive/refs/tags/v1.5.0.tar.gz"
+      ],
+      "role": "Matching PyAV Windows producer8.0.1-3 codec/build dependency; unmodified upstream archive"
+    },
+    {
+      "name": "openh264",
+      "filename": "openh264-2.6.0.tar.gz",
+      "sha256": "558544ad358283a7ab2930d69a9ceddf913f4a51ee9bf1bfb9e377322af81a69",
+      "urls": [
+        "https://github.com/cisco/openh264/archive/refs/tags/v2.6.0.tar.gz"
+      ],
+      "role": "Matching PyAV Windows producer8.0.1-3 codec/build dependency; unmodified upstream archive"
+    },
+    {
+      "name": "opencore-amr",
+      "filename": "opencore-amr-0.1.6.tar.gz",
+      "sha256": "483eb4061088e2b34b358e47540b5d495a96cd468e361050fae615b1809dc4a1",
+      "urls": [
+        "https://downloads.sourceforge.net/project/opencore-amr/opencore-amr/opencore-amr-0.1.6.tar.gz"
+      ],
+      "role": "Matching PyAV Windows producer8.0.1-3 codec/build dependency; unmodified upstream archive"
+    },
+    {
+      "name": "x264",
+      "filename": "x264-32c3b801191522961102d4bea292cdb61068d0dd.tar.bz2",
+      "sha256": "d7748f350127cea138ad97479c385c9a35a6f8527bc6ef7a52236777cf30b839",
+      "urls": [
+        "https://code.videolan.org/videolan/x264/-/archive/32c3b801191522961102d4bea292cdb61068d0dd/x264-32c3b801191522961102d4bea292cdb61068d0dd.tar.bz2"
+      ],
+      "role": "Matching PyAV Windows producer8.0.1-3 codec/build dependency; unmodified upstream archive"
+    },
+    {
+      "name": "x265",
+      "filename": "x265_4.1.tar.gz",
+      "sha256": "a31699c6a89806b74b0151e5e6a7df65de4b49050482fe5ebf8a4379d7af8f29",
+      "urls": [
+        "https://bitbucket.org/multicoreware/x265_git/downloads/x265_4.1.tar.gz"
+      ],
+      "role": "Matching PyAV Windows producer8.0.1-3 codec/build dependency; unmodified upstream archive"
+    },
+    {
+      "name": "nasm",
+      "filename": "nasm-2.16.03.tar.xz",
+      "sha256": "1412a1c760bbd05db026b6c0d1657affd6631cd0a63cddb6f73cc6d4aa616148",
+      "urls": [
+        "https://www.nasm.us/pub/nasm/releasebuilds/2.16.03/nasm-2.16.03.tar.xz"
+      ],
+      "role": "Matching PyAV Windows producer8.0.1-3 codec/build dependency; unmodified upstream archive"
+    },
+    {
+      "name": "qtbase",
+      "filename": "qtbase-everywhere-src-6.8.3.tar.xz",
+      "sha256": "56001b905601bb9023d399f3ba780d7fa940f3e4861e496a7c490331f49e0b80",
+      "urls": [
+        "https://download.qt.io/archive/qt/6.8/6.8.3/submodules/qtbase-everywhere-src-6.8.3.tar.xz"
+      ],
+      "role": "Audited bundled Qt 6.8.3 framework/image-plugin source"
+    },
+    {
+      "name": "qtsvg",
+      "filename": "qtsvg-everywhere-src-6.8.3.tar.xz",
+      "sha256": "35eb516460f00f264eb504baa253432384351cf23fb9980a5857190e8deef438",
+      "urls": [
+        "https://download.qt.io/archive/qt/6.8/6.8.3/submodules/qtsvg-everywhere-src-6.8.3.tar.xz"
+      ],
+      "role": "Audited bundled Qt 6.8.3 framework/image-plugin source"
+    },
+    {
+      "name": "qtimageformats",
+      "filename": "qtimageformats-everywhere-src-6.8.3.tar.xz",
+      "sha256": "049bfb99845e4801672aca07c3c4fc4c140f932a3a33faa899419579e33ef1c8",
+      "urls": [
+        "https://download.qt.io/archive/qt/6.8/6.8.3/submodules/qtimageformats-everywhere-src-6.8.3.tar.xz"
+      ],
+      "role": "Audited bundled Qt 6.8.3 framework/image-plugin source"
+    },
+    {
+      "name": "pyside-setup",
+      "filename": "pyside-setup-everywhere-src-6.8.3.tar.xz",
+      "sha256": "d2c896f7f1a6a7ea4c9f98cfe317272fd139703ddf612b86999f09e48aeef0e6",
+      "urls": [
+        "https://download.qt.io/official_releases/QtForPython/pyside6/PySide6-6.8.3-src/pyside-setup-everywhere-src-6.8.3.tar.xz"
+      ],
+      "role": "Matching PySide6 and Shiboken6 LGPL sources and build scripts"
+    },
+    {
+      "name": "windows-vendor-source-9e63121cf6ef9bc1744956c7a4cb772589c80806",
+      "filename": "windows-vendor-source-9e63121cf6ef9bc1744956c7a4cb772589c80806.tar.gz",
+      "sha256": "c9e5ffd289abb0b66f4f30264db731b5f90f580b4c215d96d1b938ab09763c41",
+      "urls": [
+        "https://codeload.github.com/PyAV-Org/pyav-ffmpeg/tar.gz/9e63121cf6ef9bc1744956c7a4cb772589c80806"
+      ],
+      "role": "Exact Windows producer or MSYS2 runtime sources, PKGBUILD and patches"
+    },
+    {
+      "name": "pyav16-git-bae50fa636afc1e5fd4ede2961c824aaa9a5a81d",
+      "filename": "pyav16-git-bae50fa636afc1e5fd4ede2961c824aaa9a5a81d.tar.gz",
+      "sha256": "e6768895c0212e27199926375e210fe654597e6352b610012dd6bc1d6a1e4257",
+      "urls": [
+        "https://codeload.github.com/PyAV-Org/PyAV/tar.gz/bae50fa636afc1e5fd4ede2961c824aaa9a5a81d"
+      ],
+      "role": "Exact Windows producer or MSYS2 runtime sources, PKGBUILD and patches"
+    },
+    {
+      "name": "mingw-w64-gcc-15.2.0-8",
+      "filename": "mingw-w64-gcc-15.2.0-8.src.tar.zst",
+      "sha256": "5c723ca641e699ad06da0a9954b5df50963565529691ee1e7844fe0e4730f369",
+      "urls": [
+        "https://repo.msys2.org/mingw/sources/mingw-w64-gcc-15.2.0-8.src.tar.zst"
+      ],
+      "role": "Exact Windows producer or MSYS2 runtime sources, PKGBUILD and patches"
+    },
+    {
+      "name": "mingw-w64-libiconv-1.18-1",
+      "filename": "mingw-w64-libiconv-1.18-1.src.tar.zst",
+      "sha256": "d40dc594479c0fba9aa492c5cbf63dd81a7cc4b91cc1d93619bb43c622d04709",
+      "urls": [
+        "https://repo.msys2.org/mingw/sources/mingw-w64-libiconv-1.18-1.src.tar.zst"
+      ],
+      "role": "Exact Windows producer or MSYS2 runtime sources, PKGBUILD and patches"
+    },
+    {
+      "name": "mingw-w64-zlib-1.3.1-1",
+      "filename": "mingw-w64-zlib-1.3.1-1.src.tar.zst",
+      "sha256": "9f274086ee2aa74e449908443f5e225855a4fe20f2abddadb4d18c0194c1ceff",
+      "urls": [
+        "https://repo.msys2.org/mingw/sources/mingw-w64-zlib-1.3.1-1.src.tar.zst"
+      ],
+      "role": "Exact Windows producer or MSYS2 runtime sources, PKGBUILD and patches"
+    },
+    {
+      "name": "pyav-sdist",
+      "filename": "av-16.1.0.tar.gz",
+      "sha256": "a094b4fd87a3721dacf02794d3d2c82b8d712c85b9534437e82a8a978c175ffd",
+      "urls": [
+        "https://files.pythonhosted.org/packages/78/cd/3a83ffbc3cc25b39721d174487fb0d51a76582f4a1703f98e46170ce83d4/av-16.1.0.tar.gz"
+      ],
+      "role": "Exact official PyAV16.1.0 source distribution"
+    },
+    {
+      "name": "opencv-python-headless",
+      "filename": "opencv_python_headless-4.14.0.94.tar.gz",
+      "sha256": "4afa2ea1214453648be88259f035712454faa9039b686de7753569ba8eec1577",
+      "urls": [
+        "https://files.pythonhosted.org/packages/67/8a/51ff1c6287be0b6cd3070cf095875da4ff7d6eda38507e6ada5608786a78/opencv_python_headless-4.14.0.94.tar.gz"
+      ],
+      "role": "Exact image-only OpenCV rebuild source; IPP/FFmpeg disabled by recorded recipe"
+    },
+    {
+      "name": "zig-runtime-sdk",
+      "filename": "zig-aarch64-macos-0.14.1.tar.xz",
+      "sha256": "39f3dc5e79c22088ce878edc821dedb4ca5a1cd9f5ef915e9b3cc3053e8faefa",
+      "urls": [
+        "https://ziglang.org/download/0.14.1/zig-aarch64-macos-0.14.1.tar.xz"
+      ],
+      "role": "Exact libc++/MinGW/compiler runtime sources statically compiled into image extension; developer compiler distribution"
+    },
+    {
+      "name": "python-target-sdk",
+      "filename": "python.3.13.17.nupkg",
+      "sha256": "dce409744b088f94c6e37ba41f8100c384c27e029e843237364c602d30d475e5",
+      "urls": [
+        "https://api.nuget.org/v3-flatcontainer/python/3.13.17/python.3.13.17.nupkg"
+      ],
+      "role": "Exact Windows Python target interface headers/import libraries and their original notices"
+    },
+    {
+      "name": "python-numpy",
+      "version": "2.5.4",
+      "filename": "numpy-2.5.4.tar.gz",
+      "sha256": "9a94cf751c9ad8ebaa835bcd3d40dacf8534ad086b88c38029b65123c7999d2a",
+      "urls": [
+        "https://files.pythonhosted.org/packages/95/b0/c7453d0b6e2073c3264468b106ee1563750cecc910965e67357e3698c83e/numpy-2.5.4.tar.gz"
+      ],
+      "role": "Exact locked source release and build files; unmodified upstream component",
+      "license": "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0"
+    },
+    {
+      "name": "python-tifffile",
+      "version": "2026.10.15",
+      "filename": "tifffile-2026.10.15.tar.gz",
+      "sha256": "a5ee666dbd6d62e059830a3450825a2521a981b3f45c07a80ab009484aef56f0",
+      "urls": [
+        "https://files.pythonhosted.org/packages/fd/87/a982ca5b892579397c2b155275cc0119b51feb1701eaefa18acb0245f0a4/tifffile-2026.10.15.tar.gz"
+      ],
+      "role": "Exact locked source release and build files; unmodified upstream component",
+      "license": "BSD-3-Clause"
+    },
+    {
+      "name": "python-pyinstaller",
+      "version": "6.22.3",
+      "filename": "pyinstaller-6.22.3.tar.gz",
+      "sha256": "05eb2f5615503e72939a7224d68b4aff572c6b0438ee4a17d0a4b481f399362d",
+      "urls": [
+        "https://files.pythonhosted.org/packages/63/41/f90302845945abd4ed647933ff5ee7c6ac93983187be67f897b6cb613331/pyinstaller-6.22.3.tar.gz"
+      ],
+      "role": "Exact locked source release and build files; unmodified upstream component",
+      "license": "GPLv2-or-later with a special exception which allows to use PyInstaller to build and distribute non-free programs (including commercial ones)"
+    },
+    {
+      "name": "numpy-openblas-producer",
+      "filename": "openblas-vendor-78fc0eaf6de71d92fd98f74f7e5bfa356a2f83e3.tar.gz",
+      "sha256": "ce4197b8d3c006370d3ee0f4e2d9d4940480b649a62fa209a405d419666cfb6b",
+      "urls": [
+        "https://codeload.github.com/MacPython/openblas-libs/tar.gz/78fc0eaf6de71d92fd98f74f7e5bfa356a2f83e3"
+      ],
+      "role": "Exact scipy-openblas64 0.3.34.106.0 producer, runtime notices and original compiler/build scripts"
+    },
+    {
+      "name": "pillow-libjpeg",
+      "component": "libjpeg-turbo",
+      "version": "3.2.0",
+      "filename": "libjpeg-turbo-3.2.0.tar.gz",
+      "urls": [
+        "https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/3.2.0/libjpeg-turbo-3.2.0.tar.gz"
+      ],
+      "license": "IJG AND BSD-3-Clause AND Zlib",
+      "platforms": [
+        "macos-arm64",
+        "windows-x64"
+      ],
+      "role": "Pillow 13.0.0 retained native image/font dependency; version pinned by exact producer recipe and wheel SBOM",
+      "sha256": "6f30092cef9fb839779646608f4ee14ae3cbac989c47fa05e841b0841f09878e",
+      "bytes": 2537858
+    },
+    {
+      "name": "pillow-zlib",
+      "component": "zlib-ng",
+      "version": "2.3.3",
+      "filename": "zlib-ng-2.3.3.tar.gz",
+      "urls": [
+        "https://github.com/zlib-ng/zlib-ng/archive/refs/tags/2.3.3.tar.gz"
+      ],
+      "license": "Zlib",
+      "platforms": [
+        "macos-arm64",
+        "windows-x64"
+      ],
+      "role": "Pillow 13.0.0 retained native image/font dependency; version pinned by exact producer recipe and wheel SBOM",
+      "sha256": "f9c65aa9c852eb8255b636fd9f07ce1c406f061ec19a2e7d508b318ca0c907d1",
+      "bytes": 2447397
+    },
+    {
+      "name": "pillow-xz",
+      "component": "XZ/liblzma",
+      "version": "5.8.4",
+      "filename": "xz-5.8.4.tar.gz",
+      "urls": [
+        "https://github.com/tukaani-project/xz/releases/download/v5.8.4/xz-5.8.4.tar.gz"
+      ],
+      "license": "0BSD",
+      "platforms": [
+        "macos-arm64",
+        "windows-x64"
+      ],
+      "role": "Pillow retained liblzma 5.8.4 dependency; library code is 0BSD, while the complete upstream archive separately carries its build/tool licences",
+      "sha256": "0014c7886930454fe8bd4228665b51af55eeae560ea135c9c4cd33f55b2591d9",
+      "bytes": 2799797
+    },
+    {
+      "name": "pillow-libwebp",
+      "component": "libwebp / libsharpyuv",
+      "version": "1.6.0",
+      "filename": "libwebp-1.6.0.tar.gz",
+      "urls": [
+        "https://storage.googleapis.com/downloads.webmproject.org/releases/webp/libwebp-1.6.0.tar.gz"
+      ],
+      "license": "BSD-3-Clause",
+      "platforms": [
+        "macos-arm64",
+        "windows-x64"
+      ],
+      "role": "Pillow 13.0.0 retained native image/font dependency; version pinned by exact producer recipe and wheel SBOM",
+      "sha256": "e4ab7009bf0629fd11982d4c2aa83964cf244cffba7347ecd39019a9e38c4564",
+      "bytes": 4296070
+    },
+    {
+      "name": "pillow-libtiff",
+      "component": "libtiff",
+      "version": "4.7.2",
+      "filename": "tiff-4.7.2.tar.gz",
+      "urls": [
+        "https://download.osgeo.org/libtiff/tiff-4.7.2.tar.gz"
+      ],
+      "license": "libtiff",
+      "platforms": [
+        "macos-arm64",
+        "windows-x64"
+      ],
+      "role": "Pillow 13.0.0 retained native image/font dependency; version pinned by exact producer recipe and wheel SBOM",
+      "sha256": "672bd7d10aee4606171afb864f3570b83340f6a33e2c186dc0512f7145ffdf6a",
+      "bytes": 4083368
+    },
+    {
+      "name": "pillow-libpng",
+      "component": "libpng",
+      "version": "1.6.58",
+      "filename": "libpng-1.6.58.tar.gz",
+      "urls": [
+        "https://downloads.sourceforge.net/project/libpng/libpng16/1.6.58/libpng-1.6.58.tar.gz",
+        "https://sourceforge.net/projects/libpng/files/libpng16/1.6.58/libpng-1.6.58.tar.gz/download"
+      ],
+      "license": "Libpng-2.0",
+      "platforms": [
+        "macos-arm64",
+        "windows-x64"
+      ],
+      "role": "Pillow 13.0.0 retained native image/font dependency; version pinned by exact producer recipe and wheel SBOM",
+      "sha256": "8c9b05b675ca7301a458df2c2e46f26e1d41ff36b8863f8c33530bc58c2e6225",
+      "bytes": 1582074
+    },
+    {
+      "name": "pillow-brotli",
+      "component": "Brotli",
+      "version": "1.2.0",
+      "filename": "brotli-1.2.0.tar.gz",
+      "urls": [
+        "https://github.com/google/brotli/archive/refs/tags/v1.2.0.tar.gz"
+      ],
+      "license": "MIT",
+      "platforms": [
+        "macos-arm64",
+        "windows-x64"
+      ],
+      "role": "Pillow 13.0.0 retained native image/font dependency; version pinned by exact producer recipe and wheel SBOM",
+      "sha256": "816c96e8e8f193b40151dad7e8ff37b1221d019dbcb9c35cd3fadbfe6477dfec",
+      "bytes": 646315
+    },
+    {
+      "name": "pillow-lcms2",
+      "component": "LittleCMS",
+      "version": "2.19.1",
+      "filename": "lcms2-2.19.1.tar.gz",
+      "urls": [
+        "https://downloads.sourceforge.net/project/lcms/lcms/2.19.1/lcms2-2.19.1.tar.gz",
+        "https://sourceforge.net/projects/lcms/files/lcms/2.19.1/lcms2-2.19.1.tar.gz/download"
+      ],
+      "license": "MIT",
+      "platforms": [
+        "macos-arm64",
+        "windows-x64"
+      ],
+      "role": "Pillow 13.0.0 retained native image/font dependency; version pinned by exact producer recipe and wheel SBOM",
+      "sha256": "bfc54f7bab59fbc921012014a8032e4cba4abd46db47d46b76416a8c0b2815c8",
+      "bytes": 5728743
+    },
+    {
+      "name": "pillow-openjpeg",
+      "component": "OpenJPEG",
+      "version": "2.5.4",
+      "filename": "openjpeg-2.5.4.tar.gz",
+      "urls": [
+        "https://github.com/uclouvain/openjpeg/archive/v2.5.4.tar.gz"
+      ],
+      "license": "BSD-2-Clause",
+      "platforms": [
+        "macos-arm64",
+        "windows-x64"
+      ],
+      "role": "Pillow 13.0.0 retained native image/font dependency; version pinned by exact producer recipe and wheel SBOM",
+      "sha256": "a695fbe19c0165f295a8531b1e4e855cd94d0875d2f88ec4b61080677e27188a",
+      "bytes": 2157028
+    },
+    {
+      "name": "pillow-libavif",
+      "component": "libavif",
+      "version": "1.4.2",
+      "filename": "libavif-1.4.2.tar.gz",
+      "urls": [
+        "https://github.com/AOMediaCodec/libavif/archive/v1.4.2.tar.gz"
+      ],
+      "license": "BSD-2-Clause",
+      "platforms": [
+        "macos-arm64",
+        "windows-x64"
+      ],
+      "role": "Pillow 13.0.0 retained native image/font dependency; version pinned by exact producer recipe and wheel SBOM",
+      "sha256": "2b645287340ba5a631d268b551dc2d72bd73ac33335962dd36dcdb6d8366921d",
+      "bytes": 14665927
+    },
+    {
+      "name": "pillow-dav1d",
+      "component": "dav1d",
+      "version": "1.5.3",
+      "filename": "dav1d-1.5.3.tar.bz2",
+      "urls": [
+        "https://downloads.videolan.org/pub/videolan/dav1d/1.5.3/dav1d-1.5.3.tar.bz2"
+      ],
+      "license": "BSD-2-Clause",
+      "platforms": [
+        "macos-arm64",
+        "windows-x64"
+      ],
+      "role": "Pillow libavif 1.4.2 transitive native dependency; exact tag/commit from cmake/Modules/Local*.cmake",
+      "sha256": "e099f53253f6c247580c554d53a13f1040638f2066edc3c740e4c2f15174ce22",
+      "bytes": 1217030
+    },
+    {
+      "name": "mingw-w64-winpthreads",
+      "filename": "mingw-w64-winpthreads-13.0.0.r354.g40ab95d18-1.src.tar.zst",
+      "urls": [
+        "https://repo.msys2.org/mingw/sources/mingw-w64-winpthreads-13.0.0.r354.g40ab95d18-1.src.tar.zst"
+      ],
+      "sha256": "455fd8fbd33850bc9b7292c6b0d9a4fcd03b4b6f76c0d4f93f3d0288a1053b46",
+      "role": "Exact MSYS2 source snapshot, PKGBUILD and patches for runtime DLL matching every non-debug PE section of13.0.0.r354.g40ab95d18-1"
+    }
+  ],
+  "source_access": [
+    {
+      "name": "python-pillow",
+      "version": "13.0.0",
+      "filename": "pillow-13.0.0.tar.gz",
+      "sha256": "cdcd1ba258178f7356d74170c9a81ba4eab6a5d55748bc402a5a2a6fe6be3510",
+      "urls": [
+        "https://files.pythonhosted.org/packages/ce/a4/9cc30690a394a8305e8be4c9036aa16d0dfddadd09079860b582f562496d/pillow-13.0.0.tar.gz"
+      ],
+      "role": "Exact locked source release and build files; unmodified upstream component",
+      "license": "MIT-CMU",
+      "access": "Exact published sdist source access; upstream immutable release and published SHA256. Full producer recipe/source tags retained."
+    },
+    {
+      "name": "numpy-openblas-code",
+      "version": "0.3.34.106.0",
+      "license": "BSD-3-Clause",
+      "source_commit": "446c436e10450c348169808f1a6b3fae0925c9f7",
+      "source_tree": "2e66afc39be41148ccc6c024a8b737572fc0a4ff",
+      "urls": [
+        "https://github.com/OpenMathLib/OpenBLAS/tree/446c436e10450c348169808f1a6b3fae0925c9f7",
+        "https://codeload.github.com/OpenMathLib/OpenBLAS/tar.gz/446c436e10450c348169808f1a6b3fae0925c9f7"
+      ],
+      "access": "Complete exact source commit and original producer preserved; unmodified permissive native component. Source available from identified third-party server."
+    },
+    {
+      "name": "numpy-macos-gnu-runtimes",
+      "version": "gcc-11.3.0-2",
+      "platforms": [
+        "macos-arm64"
+      ],
+      "license": "GPL-3.0-with-GCC-exception; libquadmath LGPL-2.1-or-later",
+      "source_commit": "2d280e7eafc086e9df85f50ed1a6526d6a3a204d",
+      "urls": [
+        "https://github.com/isuruf/gcc/tree/2d280e7eafc086e9df85f50ed1a6526d6a3a204d/libgfortran",
+        "https://github.com/isuruf/gcc/tree/2d280e7eafc086e9df85f50ed1a6526d6a3a204d/libquadmath",
+        "https://github.com/isuruf/gcc/tree/2d280e7eafc086e9df85f50ed1a6526d6a3a204d/libgcc",
+        "https://codeload.github.com/isuruf/gcc/tar.gz/2d280e7eafc086e9df85f50ed1a6526d6a3a204d"
+      ],
+      "access": "Full matching GCC11.3.0 source commit; original gfortran11.3.0-2 producer/binary checksums and all runtime licenses in included OpenBLAS producer. Shared replaceable runtimes; no compiler-source bytes represented as bundled."
+    },
+    {
+      "name": "pillow-freetype",
+      "component": "FreeType",
+      "version": "2.14.3",
+      "filename": "freetype-2.14.3.tar.gz",
+      "urls": [
+        "https://download.savannah.gnu.org/releases/freetype/freetype-2.14.3.tar.gz"
+      ],
+      "license": "FTL",
+      "platforms": [
+        "macos-arm64",
+        "windows-x64"
+      ],
+      "role": "Pillow 13.0.0 retained native image/font dependency; version pinned by exact producer recipe and wheel SBOM",
+      "cached": false,
+      "access": "Exact upstream release source and original producer recipe; permissive component source access retained separately"
+    },
+    {
+      "name": "pillow-harfbuzz",
+      "component": "HarfBuzz",
+      "version": "14.5.0",
+      "filename": "harfbuzz-14.5.0.tar.xz",
+      "urls": [
+        "https://github.com/harfbuzz/harfbuzz/releases/download/14.5.0/harfbuzz-14.5.0.tar.xz"
+      ],
+      "license": "MIT",
+      "platforms": [
+        "macos-arm64",
+        "windows-x64"
+      ],
+      "role": "Pillow 13.0.0 retained native image/font dependency; version pinned by exact producer recipe and wheel SBOM",
+      "cached": false,
+      "access": "Exact upstream release source and original producer recipe; permissive component source access retained separately"
+    },
+    {
+      "name": "pillow-aom",
+      "component": "AOM",
+      "version": "3.14.1",
+      "filename": "libaom-3.14.1.tar.gz",
+      "urls": [
+        "https://aomedia.googlesource.com/aom/+archive/refs/tags/v3.14.1.tar.gz"
+      ],
+      "license": "BSD-3-Clause",
+      "platforms": [
+        "macos-arm64",
+        "windows-x64"
+      ],
+      "role": "Pillow libavif 1.4.2 transitive native dependency; exact tag/commit from cmake/Modules/Local*.cmake",
+      "cached": false,
+      "access": "Exact immutable upstream source tag/commit"
+    },
+    {
+      "name": "pillow-libyuv",
+      "component": "libyuv",
+      "version": "644251f252a84bf8ce91ff0aca86a9b16b069ab8",
+      "filename": "libyuv-644251f252a84bf8ce91ff0aca86a9b16b069ab8.tar.gz",
+      "urls": [
+        "https://chromium.googlesource.com/libyuv/libyuv/+archive/644251f252a84bf8ce91ff0aca86a9b16b069ab8.tar.gz"
+      ],
+      "license": "BSD-3-Clause",
+      "platforms": [
+        "macos-arm64",
+        "windows-x64"
+      ],
+      "role": "Pillow libavif 1.4.2 transitive native dependency; exact tag/commit from cmake/Modules/Local*.cmake",
+      "cached": false,
+      "access": "Exact immutable upstream source tag/commit"
+    },
+    {
+      "name": "pillow-libxcb",
+      "component": "libxcb",
+      "version": "1.17.0",
+      "urls": [
+        "https://www.x.org/releases/individual/lib/libxcb-1.17.0.tar.gz"
+      ],
+      "license": "MIT",
+      "platforms": [
+        "macos-arm64"
+      ],
+      "role": "Retained Mac XCB image-display library; exact version from Pillow producer .github/workflows/wheels-dependencies.sh",
+      "cached": false,
+      "access": "Exact upstream release source access"
+    },
+    {
+      "name": "pillow-libxau",
+      "component": "libXau",
+      "version": "1.0.12",
+      "urls": [
+        "https://www.x.org/pub/individual/lib/libXau-1.0.12.tar.gz"
+      ],
+      "license": "MIT",
+      "platforms": [
+        "macos-arm64"
+      ],
+      "role": "Retained Mac libxcb authentication dependency; exact version from Pillow producer .github/workflows/wheels-dependencies.sh",
+      "cached": false,
+      "access": "Exact upstream release source access"
+    },
+    {
+      "name": "pillow-xcb-proto",
+      "component": "xcb-proto",
+      "version": "1.17.0",
+      "urls": [
+        "https://xorg.freedesktop.org/archive/individual/proto/xcb-proto-1.17.0.tar.gz"
+      ],
+      "license": "MIT",
+      "platforms": [
+        "macos-arm64"
+      ],
+      "role": "Build-time XCB protocol definitions; exact version from Pillow producer .github/workflows/wheels-dependencies.sh",
+      "cached": false,
+      "access": "Exact upstream release source access"
+    },
+    {
+      "name": "pillow-xorgproto",
+      "component": "xorgproto",
+      "version": "2025.1",
+      "urls": [
+        "https://www.x.org/pub/individual/proto/xorgproto-2025.1.tar.gz"
+      ],
+      "license": "MIT",
+      "platforms": [
+        "macos-arm64"
+      ],
+      "role": "Build-time X11 protocol headers; exact version from Pillow producer .github/workflows/wheels-dependencies.sh",
+      "cached": false,
+      "access": "Exact upstream release source access"
+    },
+    {
+      "name": "pillow-libpthread-stubs",
+      "component": "libpthread-stubs",
+      "version": "0.5",
+      "urls": [
+        "https://xcb.freedesktop.org/dist/libpthread-stubs-0.5.tar.gz"
+      ],
+      "license": "MIT",
+      "platforms": [
+        "macos-arm64"
+      ],
+      "role": "Build-time XCB platform stubs; exact version from Pillow producer .github/workflows/wheels-dependencies.sh",
+      "cached": false,
+      "access": "Exact upstream release source access"
+    },
+    {
+      "name": "pillow-producer",
+      "component": "Pillow complete original producer repository",
+      "version": "13.0.0",
+      "commit": "293218ad059d994baf1777d882911bed6a49704a",
+      "urls": [
+        "https://github.com/python-pillow/Pillow/tree/293218ad059d994baf1777d882911bed6a49704a",
+        "https://codeload.github.com/python-pillow/Pillow/tar.gz/293218ad059d994baf1777d882911bed6a49704a"
+      ],
+      "license": "MIT-CMU",
+      "platforms": [
+        "macos-arm64",
+        "windows-x64"
+      ],
+      "role": "Exact unmodified Pillow release source, CMake/MSBuild patches, wheel recipes and source dependency versions",
+      "cached": false
+    },
+    {
+      "name": "pillow-multibuild",
+      "component": "Pillow multibuild helper submodule",
+      "commit": "c893f305c6066b6d940e10d3333be8cb27fa3947",
+      "urls": [
+        "https://github.com/multi-build/multibuild/tree/c893f305c6066b6d940e10d3333be8cb27fa3947",
+        "https://codeload.github.com/multi-build/multibuild/tar.gz/c893f305c6066b6d940e10d3333be8cb27fa3947"
+      ],
+      "license": "BSD-2-Clause",
+      "platforms": [
+        "macos-arm64"
+      ],
+      "role": "Exact producer gitlink recorded by Pillow commit tree",
+      "cached": false
+    }
+  ],
+  "extra_notices": [
+    {
+      "path": "packaging/media/WINPTHREAD-COPYING.txt",
+      "sha256": "63263614cdd29f2f93cba85e992f041b31f9fc7b4033692f31269489a8a1b177",
+      "component": "Exact byte-matched winpthread runtime"
+    }
+  ]
+}

@@ -1,0 +1,258 @@
+"""Developer packaging checks require no Windows execution or network access."""
+
+import importlib
+import json
+import struct
+import zipfile
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.fixture
+def win(monkeypatch):
+    monkeypatch.syspath_prepend(str(ROOT))
+    return importlib.import_module("tools.build_windows_portable")
+
+
+def small_pe(*, imported="kernel32.dll", subsystem=2):
+    data = bytearray(0x1000)
+    data[:2] = b"MZ"
+    struct.pack_into("<I", data, 0x3C, 0x80)
+    data[0x80:0x84] = b"PE\0\0"
+    struct.pack_into("<HH", data, 0x84, 0x8664, 1)
+    struct.pack_into("<H", data, 0x94, 240)
+    optional = 0x98
+    struct.pack_into("<H", data, optional, 0x20B)
+    struct.pack_into("<Q", data, optional + 24, 0x140000000)
+    struct.pack_into("<I", data, optional + 60, 0x200)
+    struct.pack_into("<H", data, optional + 68, subsystem)
+    struct.pack_into("<I", data, optional + 108, 16)
+    struct.pack_into("<4I", data, optional + 240 + 8, 0xE00, 0x1000, 0xE00, 0x200)
+    struct.pack_into("<II", data, optional + 112 + 8, 0x1100, 40)
+    struct.pack_into("<5I", data, 0x300, 0x1200, 0, 0, 0x1300, 0x1200)
+    struct.pack_into("<QQ", data, 0x400, 0x1400, 0)
+    data[0x500 : 0x500 + len(imported) + 1] = imported.encode() + b"\0"
+    symbol = b"\0\0GetModuleFileNameW\0"
+    data[0x600 : 0x600 + len(symbol)] = symbol
+    return bytes(data)
+
+
+def opencv_pe():
+    data = bytearray(small_pe())
+    struct.pack_into("<II", data, 0x98 + 112, 0x1500, 0x100)
+    struct.pack_into("<5I", data, 0x700 + 20, 1, 1, 0x1560, 0x1570, 0x1580)
+    struct.pack_into("<I", data, 0x760, 0x1020)
+    struct.pack_into("<I", data, 0x770, 0x1590)
+    struct.pack_into("<H", data, 0x780, 0)
+    data[0x790 : 0x790 + 11] = b"PyInit_cv2\0"
+    return bytes(data)
+
+
+def test_pe_machine_subsystem_import_names_read_without_execution(win):
+    pe = win.PEImage(small_pe())
+    assert pe.machine == 0x8664 and pe.subsystem == 2
+    assert pe.imports() == {"kernel32.dll": ["GetModuleFileNameW"]}
+    assert pe.exports() == {}
+    assert pe.imports(delayed=True) == {}
+    with pytest.raises(ValueError, match="Windows PE"):
+        win.PEImage(b"not executable")
+
+
+@pytest.mark.parametrize("name", ["../original.jpg", "/absolute", "C:/windows", "folder\\file"])
+def test_archive_path_escape_rejected(win, name):
+    with pytest.raises(ValueError, match="Unsafe archive"):
+        win.archive_path(name)
+
+
+def test_zip_extraction_never_replaces_original_media(win, tmp_path):
+    original = tmp_path / "original.jpg"
+    original.write_bytes(b"original media")
+    archive = tmp_path / "bad.whl"
+    with zipfile.ZipFile(archive, "w") as handle:
+        handle.writestr("../original.jpg", b"replacement")
+    with pytest.raises(ValueError):
+        win.extract_zip(archive, tmp_path / "target", wheel=True)
+    assert original.read_bytes() == b"original media"
+
+
+def test_cached_hash_mismatch_and_offline_missing_input_fail_before_network(win, tmp_path):
+    entry = {"url": "https://files.pythonhosted.org/packages/package.whl", "sha256": "0" * 64}
+    with pytest.raises(FileNotFoundError, match="not cached"):
+        win.acquire(entry, tmp_path, offline=True)
+    (tmp_path / "package.whl").write_bytes(b"wrong archive")
+    with pytest.raises(ValueError, match="SHA-256"):
+        win.acquire(entry, tmp_path, offline=True)
+    with pytest.raises(ValueError, match="approved HTTPS"):
+        win.acquire({**entry, "url": "http://example.invalid/file.whl"}, tmp_path)
+
+
+def test_qt_and_opencv_video_plugins_not_used_by_app_are_omitted(win, tmp_path):
+    paths = {
+        "runtime/Lib/site-packages/PySide6/QtCore.pyd": small_pe(imported="Qt6Core.dll"),
+        "runtime/Lib/site-packages/PySide6/Qt6Core.dll": small_pe(),
+        "runtime/Lib/site-packages/PySide6/plugins/designer/unneeded.dll": small_pe(
+            imported="absent.dll"
+        ),
+        "runtime/Lib/site-packages/cv2/cv2.pyd": small_pe(),
+        "runtime/Lib/site-packages/cv2/opencv_videoio_ffmpeg4140_64.dll": small_pe(
+            imported="legacy_av.dll"
+        ),
+    }
+    for relative, contents in paths.items():
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(contents)
+    report = win.native_audit(tmp_path, trim_qt=True)
+    assert len(report["native_files"]) == 3
+    assert len(report["omitted_unused_binaries"]) == 2
+    assert (tmp_path / "runtime/Lib/site-packages/cv2/cv2.pyd").is_file()
+    assert not list(tmp_path.rglob("opencv_videoio_ffmpeg*.dll"))
+    assert win.native_audit(tmp_path)["system_imports"] == ["kernel32.dll"]
+
+
+def test_unknown_required_dll_and_unexpected_cv_plugin_import_fail_closed(win, tmp_path):
+    path = tmp_path / "program.exe"
+    path.write_bytes(small_pe(imported="missing-runtime.dll"))
+    with pytest.raises(ValueError, match="Unbundled native"):
+        win.native_audit(tmp_path)
+    path.write_bytes(small_pe(imported="opencv_videoio_ffmpeg4140_64.dll"))
+    (tmp_path / "opencv_videoio_ffmpeg4140_64.dll").write_bytes(small_pe())
+    with pytest.raises(ValueError, match="unused video plugin"):
+        win.native_audit(tmp_path, trim_qt=True)
+
+
+def test_real_project_resolves_windows_profile_and_stable_abi_wheels(win):
+    wheels = win.locked_wheels()
+    assert len(wheels) == 7
+    by_name = {entry["package"]: entry for entry in wheels}
+    assert by_name["av"]["version"] == "16.1.0"
+    assert "cp313-cp313-win_amd64" in by_name["av"]["filename"]
+    assert "cp39-abi3-win_amd64" in by_name["pyside6-essentials"]["filename"]
+    assert by_name["tifffile"]["filename"].endswith("py3-none-any.whl")
+    assert all(len(entry["sha256"]) == 64 for entry in wheels)
+
+
+def test_final_zip_requires_positive_matching_windows_source_scope(win, tmp_path):
+    stage = tmp_path / "stage"
+    stage.mkdir()
+    (stage / "payload.txt").write_text("staged source")
+    manifest = {
+        "kind": "freedive_windows_portable",
+        "files": win.file_hashes(stage),
+        "payload_sha256": "a" * 64,
+        "opencv_native": {"status": "built"},
+    }
+    (stage / win.MANIFEST).write_text(json.dumps(manifest))
+    marker = tmp_path / "source.json"
+    marker.write_text(json.dumps({"complete": True, "scope": "Windows not asserted"}))
+    output = tmp_path / "release.zip"
+    with pytest.raises(ValueError, match="explicitly cover Windows"):
+        win.finalize(stage, output, marker)
+    marker.write_text(
+        json.dumps(
+            {"complete": True, "platforms": ["windows-x64"], "windows_payload_sha256": "b" * 64}
+        )
+    )
+    with pytest.raises(ValueError, match="does not match"):
+        win.finalize(stage, output, marker)
+    assert not output.exists()
+    (stage / "payload.txt").write_text("changed")
+    with pytest.raises(ValueError, match="Staged application changed"):
+        win.finalize(stage, output, marker)
+
+
+def test_native_opencv_replaces_entire_stock_package_and_verifies_export(win, tmp_path):
+    package = tmp_path / "compiled/cv2"
+    package.mkdir(parents=True)
+    (package / "cv2.pyd").write_bytes(opencv_pe())
+    (package / "__init__.py").write_text("from .cv2 import *\n")
+    manifest = {
+        "status": "built",
+        "platform": "windows-x64",
+        "with_ipp": False,
+        "with_ffmpeg": False,
+        "package_directory": str(package),
+        "files": {p.name: win.sha256(p) for p in package.iterdir()},
+    }
+    manifest_path = tmp_path / "native.json"
+    manifest_path.write_text(json.dumps(manifest))
+    stage = tmp_path / "stage"
+    stock = stage / "runtime/Lib/site-packages/cv2"
+    stock.mkdir(parents=True)
+    (stock / "old-ipp.pyd").write_bytes(b"old binary must not survive")
+    (stock / "opencv_videoio_ffmpeg4140_64.dll").write_bytes(b"unneeded plugin")
+    result = win.install_native_opencv(stage, manifest_path)
+    assert "PyInit_cv2" in win.PEImage((stock / "cv2.pyd").read_bytes()).exports()
+    assert set(path.name for path in stock.iterdir()) == {"cv2.pyd", "__init__.py"}
+    assert result["manifest_sha256"] == win.sha256(manifest_path)
+
+
+def test_native_opencv_hash_failure_preserves_previous_package(win, tmp_path):
+    package = tmp_path / "compiled"
+    package.mkdir()
+    (package / "cv2.pyd").write_bytes(opencv_pe())
+    manifest_path = tmp_path / "native.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "status": "built",
+                "platform": "windows-x64",
+                "with_ipp": False,
+                "with_ffmpeg": False,
+                "package_directory": str(package),
+                "files": {"cv2.pyd": "0" * 64},
+            }
+        )
+    )
+    stage = tmp_path / "stage"
+    stock = stage / "runtime/Lib/site-packages/cv2"
+    stock.mkdir(parents=True)
+    (stock / "prior.pyd").write_bytes(b"prior")
+    with pytest.raises(ValueError, match="hashes"):
+        win.install_native_opencv(stage, manifest_path)
+    assert (stock / "prior.pyd").read_bytes() == b"prior"
+
+
+def test_no_native_pass_record_is_emitted_on_a_different_os(win, tmp_path, monkeypatch):
+    checker = importlib.import_module("tools.check_windows_portable")
+    stage = tmp_path / "stage"
+    stage.mkdir()
+    (stage / "program.exe").write_bytes(small_pe())
+    (stage / win.MANIFEST).write_text(
+        json.dumps(
+            {
+                "kind": "freedive_windows_portable",
+                "files": win.file_hashes(stage),
+                "payload_sha256": "a" * 64,
+                "opencv_native": {"status": "built"},
+            }
+        )
+    )
+    monkeypatch.setattr(checker.platform, "system", lambda: "Darwin")
+    output = tmp_path / "proof.json"
+    with pytest.raises(RuntimeError, match="Windows execution is unavailable"):
+        checker.check(stage, output)
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("mode", ["--smoke-test", "--smoke-video"])
+def test_packaged_gui_startup_failure_returns_without_dialog_in_both_smoke_modes(
+    win, monkeypatch, mode
+):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "portable_bootstrap_test", ROOT / "packaging/windows/portable_bootstrap.py"
+    )
+    bootstrap = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bootstrap)
+    monkeypatch.setattr(bootstrap.sys, "argv", ["app", "--launcher-gui", mode, "source"])
+
+    def failure():
+        raise RuntimeError("Simulated native startup failure")
+
+    monkeypatch.setattr(bootstrap, "configure", failure)
+    assert bootstrap.main() == 1

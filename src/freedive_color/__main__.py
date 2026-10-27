@@ -4,6 +4,10 @@ import sys
 def main() -> int:
     arguments = sys.argv[1:]
     flags = {argument.split("=", 1)[0] for argument in arguments}
+    if "--smoke-video" in flags:
+        from .video_smoke import run
+
+        return run(arguments)
     if "--smoke-test" in flags:
         from .smoke import run
 

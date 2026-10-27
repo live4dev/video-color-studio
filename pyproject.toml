@@ -15,7 +15,8 @@ dependencies = [
   "Pillow>=11.1,<14",
   "PySide6-Essentials==6.8.3",
   "tifffile>=2025.1.10",
-  "av==15.1.0",
+  "av==15.1.0; sys_platform != 'win32'",
+  "av==16.1.0; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]

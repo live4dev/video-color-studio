@@ -1,0 +1,693 @@
+{
+  "schema": 1,
+  "package": "Pillow",
+  "version": "13.0.0",
+  "provenance": {
+    "producer_commit": "293218ad059d994baf1777d882911bed6a49704a",
+    "producer_source_url": "https://github.com/python-pillow/Pillow/tree/293218ad059d994baf1777d882911bed6a49704a",
+    "producer_dependency_versions": {
+      "brotli": "1.2.0",
+      "bzip2": "1.0.8",
+      "freetype": "2.14.3",
+      "fribidi": "1.0.17",
+      "harfbuzz": "14.5.0",
+      "jpegturbo": "3.2.0",
+      "lcms2": "2.19.1",
+      "libavif": "1.4.2",
+      "libimagequant": "4.4.1",
+      "libpng": "1.6.58",
+      "libwebp": "1.6.0",
+      "libxcb": "1.17.0",
+      "openjpeg": "2.5.4",
+      "tiff": "4.7.2",
+      "xz": "5.8.4",
+      "zlib-ng": "2.3.3",
+      "zstd": "1.5.7"
+    },
+    "producer_dependency_json_sha256": "63413d6dccf72367fc4c04c2560999e7a40ea14cf226dcc995d238cf3d25533b",
+    "producer_windows_recipe_sha256": "cfb3dd98c881cf2aea051e9d57e751d8d9613d7c9a48dd1b71ae68d2de69e570",
+    "producer_macos_recipe_sha256": "6408b160bacc969023a6d7e45cb7db8d248948ec59750e2c0ce41a359342877a",
+    "multibuild_gitlink": "c893f305c6066b6d940e10d3333be8cb27fa3947",
+    "wheel_sbom_path": "pillow-13.0.0.dist-info/sboms/pillow-13.0.0.cdx.json",
+    "wheel_sbom_sha256": "fe1ca6e3a4f73e7018a3805a75a19377453f342d203712f37387ad6ee853fd44",
+    "windows_wheel_sha256": "9dda0788a9932776a75d8bcc020076edc308ce2508b51f6739a45e3158b3fc42",
+    "windows_execution": "NOT RUN; PE strings, official recipe and embedded SBOM checked statically",
+    "macos_runtime_features": {
+      "pil": "13.0.0",
+      "tkinter": "9.0",
+      "freetype2": "2.14.3",
+      "littlecms2": "2.19",
+      "webp": "1.6.0",
+      "avif": "1.4.2",
+      "libjpeg_turbo": "3.2.0",
+      "zlib_ng": "2.3.3",
+      "xcb": null,
+      "jpg": "6.2",
+      "jpg_2000": "2.5.4",
+      "zlib": "1.3.1.zlib-ng",
+      "libtiff": "4.7.2"
+    },
+    "macos_harfbuzz_runtime_version": "14.5.0",
+    "macos_avif_codec_versions": "dav1d [dec]:1.5.3-0-gb546257, aom [enc]:3.14.1",
+    "macos_native_files": [
+      {
+        "path": ".dylibs/libXau.6.dylib",
+        "sha256": "c30323abc362ae0e5ff8b043e13a179a1bf6a9f76011ffc57195fd43020de535",
+        "load_commands": [
+          "\t/DLC/PIL/.dylibs/libXau.6.dylib (compatibility version 7.0.0, current version 7.0.0)",
+          "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)"
+        ]
+      },
+      {
+        "path": ".dylibs/libavif.16.4.2.dylib",
+        "sha256": "5e27779af8078c5586c045176db72779a09e5f87c6d516373913a6c092b76340",
+        "load_commands": [
+          "\t/DLC/PIL/.dylibs/libavif.16.4.2.dylib (compatibility version 16.0.0, current version 16.4.2)",
+          "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)"
+        ]
+      },
+      {
+        "path": ".dylibs/libbrotlicommon.1.2.0.dylib",
+        "sha256": "3f4843c17f3cccc986279a4c9ac8a11dc3077c412fd856d1bad8231bf027a25f",
+        "load_commands": [
+          "\t/DLC/PIL/.dylibs/libbrotlicommon.1.2.0.dylib (compatibility version 1.0.0, current version 1.2.0)",
+          "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)"
+        ]
+      },
+      {
+        "path": ".dylibs/libbrotlidec.1.2.0.dylib",
+        "sha256": "351fa4a2f4faed4147dfead81a8b0f5500ada31db64f74c8368bc1ab894f0dd1",
+        "load_commands": [
+          "\t/DLC/PIL/.dylibs/libbrotlidec.1.2.0.dylib (compatibility version 1.0.0, current version 1.2.0)",
+          "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)",
+          "\t@loader_path/libbrotlicommon.1.2.0.dylib (compatibility version 1.0.0, current version 1.2.0)"
+        ]
+      },
+      {
+        "path": ".dylibs/libfreetype.6.dylib",
+        "sha256": "b1e5b0bd6f696d9458bbd370c1417f8b1a6bb6953c26c4c0543750f96ec32c33",
+        "load_commands": [
+          "\t/DLC/PIL/.dylibs/libfreetype.6.dylib (compatibility version 27.0.0, current version 27.6.0)",
+          "\t/usr/lib/libbz2.1.0.dylib (compatibility version 1.0.0, current version 1.0.8)",
+          "\t@loader_path/libpng16.16.dylib (compatibility version 75.0.0, current version 75.0.0)",
+          "\t@loader_path/libz.1.3.1.zlib-ng.dylib (compatibility version 1.0.0, current version 1.3.1)",
+          "\t@loader_path/libharfbuzz.0.dylib (compatibility version 61450.0.0, current version 61450.0.0)",
+          "\t@loader_path/libbrotlidec.1.2.0.dylib (compatibility version 1.0.0, current version 1.2.0)",
+          "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)"
+        ]
+      },
+      {
+        "path": ".dylibs/libharfbuzz.0.dylib",
+        "sha256": "2c88b14217bd5c823d615282dc79b860c79b7d066ddae72ad4d10e0ecca8bcb5",
+        "load_commands": [
+          "\t/DLC/PIL/.dylibs/libharfbuzz.0.dylib (compatibility version 61450.0.0, current version 61450.0.0)",
+          "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)",
+          "\t@loader_path/libfreetype.6.dylib (compatibility version 27.0.0, current version 27.6.0)"
+        ]
+      },
+      {
+        "path": ".dylibs/libjpeg.62.4.0.dylib",
+        "sha256": "172444d18ef193c128e3f9f4323e9d22b0d824b8172a1389ecd048b279280629",
+        "load_commands": [
+          "\t/DLC/PIL/.dylibs/libjpeg.62.4.0.dylib (compatibility version 62.0.0, current version 62.4.0)",
+          "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)"
+        ]
+      },
+      {
+        "path": ".dylibs/liblcms2.2.dylib",
+        "sha256": "188685d4468afb124af58f471fb2382f94b98ef560995bc910eefab50134e8fb",
+        "load_commands": [
+          "\t/DLC/PIL/.dylibs/liblcms2.2.dylib (compatibility version 3.0.0, current version 3.19.0)",
+          "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)"
+        ]
+      },
+      {
+        "path": ".dylibs/liblzma.5.dylib",
+        "sha256": "f08e18e2363a8e4fc8099de9c8b0b96b30a6a2e4a60e890f2cebb1a9e25a92fa",
+        "load_commands": [
+          "\t/DLC/PIL/.dylibs/liblzma.5.dylib (compatibility version 14.0.0, current version 14.4.0)",
+          "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)"
+        ]
+      },
+      {
+        "path": ".dylibs/libopenjp2.2.5.4.dylib",
+        "sha256": "2af52733d40803561752e12d6e917a5e16932a1fb7426760a2e6d8c10989c47a",
+        "load_commands": [
+          "\t/DLC/PIL/.dylibs/libopenjp2.2.5.4.dylib (compatibility version 7.0.0, current version 2.5.4)",
+          "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)"
+        ]
+      },
+      {
+        "path": ".dylibs/libpng16.16.dylib",
+        "sha256": "4777ff2529c03d4181470fb9afa10081d36153055c2989aa16bb15d6b513e772",
+        "load_commands": [
+          "\t/DLC/PIL/.dylibs/libpng16.16.dylib (compatibility version 75.0.0, current version 75.0.0)",
+          "\t@loader_path/libz.1.3.1.zlib-ng.dylib (compatibility version 1.0.0, current version 1.3.1)",
+          "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)"
+        ]
+      },
+      {
+        "path": ".dylibs/libsharpyuv.0.dylib",
+        "sha256": "6b2d464413fc35783c79936f1e6be631585448a37765cf79c238be2ea5e5505b",
+        "load_commands": [
+          "\t/DLC/PIL/.dylibs/libsharpyuv.0.dylib (compatibility version 2.0.0, current version 2.2.0)",
+          "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)"
+        ]
+      },
+      {
+        "path": ".dylibs/libtiff.6.dylib",
+        "sha256": "d17ccc4d89a37c1db72aca63fdf26b2f07eaaeb737a5232a337585e3c920b3ed",
+        "load_commands": [
+          "\t/DLC/PIL/.dylibs/libtiff.6.dylib (compatibility version 10.0.0, current version 10.0.0)",
+          "\t@loader_path/liblzma.5.dylib (compatibility version 14.0.0, current version 14.4.0)",
+          "\t@loader_path/libjpeg.62.4.0.dylib (compatibility version 62.0.0, current version 62.4.0)",
+          "\t@loader_path/libz.1.3.1.zlib-ng.dylib (compatibility version 1.0.0, current version 1.3.1)",
+          "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)"
+        ]
+      },
+      {
+        "path": ".dylibs/libwebp.7.dylib",
+        "sha256": "0a2ba0179e6bcc1bccc1a88c38b7d8efd0302d45a1bfc1eb4cf1f1f03ede73f0",
+        "load_commands": [
+          "\t/DLC/PIL/.dylibs/libwebp.7.dylib (compatibility version 10.0.0, current version 10.0.0)",
+          "\t@loader_path/libsharpyuv.0.dylib (compatibility version 2.0.0, current version 2.2.0)",
+          "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)"
+        ]
+      },
+      {
+        "path": ".dylibs/libwebpdemux.2.dylib",
+        "sha256": "f5ec6b6750ee91ff032ba62b18afc5f37c7bc842bfc9b2d325df41bc656ea066",
+        "load_commands": [
+          "\t/DLC/PIL/.dylibs/libwebpdemux.2.dylib (compatibility version 3.0.0, current version 3.17.0)",
+          "\t@loader_path/libwebp.7.dylib (compatibility version 10.0.0, current version 10.0.0)",
+          "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)"
+        ]
+      },
+      {
+        "path": ".dylibs/libwebpmux.3.dylib",
+        "sha256": "f9c291035190c3af29494ce9fb62987c25ee78c4365c92c323ccc5ec8740143d",
+        "load_commands": [
+          "\t/DLC/PIL/.dylibs/libwebpmux.3.dylib (compatibility version 5.0.0, current version 5.2.0)",
+          "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)",
+          "\t@loader_path/libwebp.7.dylib (compatibility version 10.0.0, current version 10.0.0)"
+        ]
+      },
+      {
+        "path": ".dylibs/libxcb.1.1.0.dylib",
+        "sha256": "125bcffc8971652784b6a8b4061501f891aeafdf361aa4b777ba3bacc548bc84",
+        "load_commands": [
+          "\t/DLC/PIL/.dylibs/libxcb.1.1.0.dylib (compatibility version 3.0.0, current version 3.0.0)",
+          "\t@loader_path/libXau.6.dylib (compatibility version 7.0.0, current version 7.0.0)",
+          "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)"
+        ]
+      },
+      {
+        "path": ".dylibs/libz.1.3.1.zlib-ng.dylib",
+        "sha256": "39ffbe6a87460a579cf414c3ee668e449b32c2cdc2cc0b64921d53fd59cb56ed",
+        "load_commands": [
+          "\t/DLC/PIL/.dylibs/libz.1.3.1.zlib-ng.dylib (compatibility version 1.0.0, current version 1.3.1)",
+          "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)"
+        ]
+      },
+      {
+        "path": "_avif.cpython-312-darwin.so",
+        "sha256": "e8a87d29c9ea3e81527efb1818ab7b6ead5bed54e4c2664c73e47f67746fd5f8",
+        "load_commands": [
+          "\t@loader_path/.dylibs/libavif.16.4.2.dylib (compatibility version 16.0.0, current version 16.4.2)",
+          "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)"
+        ]
+      },
+      {
+        "path": "_imaging.cpython-312-darwin.so",
+        "sha256": "058a696be42c06bf77d5efd929c13f734a5e1a0c0a9e4b3e684ee5af13b4aa8f",
+        "load_commands": [
+          "\t@loader_path/.dylibs/libtiff.6.dylib (compatibility version 10.0.0, current version 10.0.0)",
+          "\t@loader_path/.dylibs/libjpeg.62.4.0.dylib (compatibility version 62.0.0, current version 62.4.0)",
+          "\t@loader_path/.dylibs/libopenjp2.2.5.4.dylib (compatibility version 7.0.0, current version 2.5.4)",
+          "\t@loader_path/.dylibs/libz.1.3.1.zlib-ng.dylib (compatibility version 1.0.0, current version 1.3.1)",
+          "\t@loader_path/.dylibs/libxcb.1.1.0.dylib (compatibility version 3.0.0, current version 3.0.0)",
+          "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)"
+        ]
+      },
+      {
+        "path": "_imagingcms.cpython-312-darwin.so",
+        "sha256": "c940dbd46ca213366037fd958d11678497a5cd41971fc54126ac37baad396a81",
+        "load_commands": [
+          "\t@loader_path/.dylibs/liblcms2.2.dylib (compatibility version 3.0.0, current version 3.19.0)",
+          "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)"
+        ]
+      },
+      {
+        "path": "_imagingft.cpython-312-darwin.so",
+        "sha256": "bbd5e4c25140c7c3b476e14ee613457c55da2694029e9a4b0805ed6711fdfd2c",
+        "load_commands": [
+          "\t@loader_path/.dylibs/libfreetype.6.dylib (compatibility version 27.0.0, current version 27.6.0)",
+          "\t@loader_path/.dylibs/libharfbuzz.0.dylib (compatibility version 61450.0.0, current version 61450.0.0)",
+          "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)"
+        ]
+      },
+      {
+        "path": "_imagingmath.cpython-312-darwin.so",
+        "sha256": "3209a70da6bb99bc9f2dc4d98d168baae82440a5062e91a19acccf6c2b653ff6",
+        "load_commands": [
+          "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)"
+        ]
+      },
+      {
+        "path": "_imagingmorph.cpython-312-darwin.so",
+        "sha256": "0237c1c8ca6ab8ad087d8c6cc929d8cfbd49396491b990503e47963f616a021d",
+        "load_commands": [
+          "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)"
+        ]
+      },
+      {
+        "path": "_imagingtk.cpython-312-darwin.so",
+        "sha256": "1e11150b6f16eae297ea7da2193fa66ff4597d85db9e5d60c7238f190c5dd745",
+        "load_commands": [
+          "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)"
+        ]
+      },
+      {
+        "path": "_webp.cpython-312-darwin.so",
+        "sha256": "3c4c8cb49c955900e361ca1bcaf44f8863ffa9edb9f7b3372e15e8938a053320",
+        "load_commands": [
+          "\t@loader_path/.dylibs/libwebp.7.dylib (compatibility version 10.0.0, current version 10.0.0)",
+          "\t@loader_path/.dylibs/libwebpmux.3.dylib (compatibility version 5.0.0, current version 5.2.0)",
+          "\t@loader_path/.dylibs/libwebpdemux.2.dylib (compatibility version 3.0.0, current version 3.17.0)",
+          "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)"
+        ]
+      }
+    ],
+    "windows_native_files": [
+      {
+        "path": "PIL/_avif.cp313-win_amd64.pyd",
+        "sha256": "6c6e5d33db5ecd8a28252103c97ac7867d376371875b6baa609947d8e778022a"
+      },
+      {
+        "path": "PIL/_imaging.cp313-win_amd64.pyd",
+        "sha256": "832167d2ecd950dc2382a9866e346d5886262bc8790bbf24613f56ad19d52f82"
+      },
+      {
+        "path": "PIL/_imagingcms.cp313-win_amd64.pyd",
+        "sha256": "4ab7b14029ea0a6bdb7f94b069ad3399d53fd192aaeed7460fbabba61d065b76"
+      },
+      {
+        "path": "PIL/_imagingft.cp313-win_amd64.pyd",
+        "sha256": "91f0a8e145163803637620517bad32ad5cb551d8a4dc02c3309811af24dbcbcc"
+      },
+      {
+        "path": "PIL/_imagingmath.cp313-win_amd64.pyd",
+        "sha256": "d1aafa904aa69eed5008d1ced3b20c049670cd521593d1f0a4ff2ef44f9371cb"
+      },
+      {
+        "path": "PIL/_imagingmorph.cp313-win_amd64.pyd",
+        "sha256": "e50c8f830f06ced4cca8fd9f5cb10f0918a2d12c6263dd7bc1de1a3666b2102b"
+      },
+      {
+        "path": "PIL/_imagingtk.cp313-win_amd64.pyd",
+        "sha256": "a7af2e099caae412470919646d5d1cf36566fbed697c4cd44e926029dd2c4ccf"
+      },
+      {
+        "path": "PIL/_webp.cp313-win_amd64.pyd",
+        "sha256": "77ec2f34c0a33151c7b020dfc987163678e1e3428508117ca8cbc68dfb2af2b1"
+      }
+    ]
+  },
+  "scope_notes": [
+    "Pillow high-level SBOM lists optional features and does not prove they are compiled; actual native files, strings, Mac runtime feature versions and original producer flags were cross-checked.",
+    "LittleCMS reports only 2.19 through its public runtime version API; the exact producer dependency manifest and wheel SBOM pin patch release 2.19.1.",
+    "Mac raqm/FriBiDi features are disabled at runtime, but HarfBuzz 14.5.0 is still shipped and linked by FreeType; its exact source is therefore included in access records.",
+    "Pillow libavif statically contains AOM 3.14.1 encoder, dav1d 1.5.3 decoder and pinned libyuv; libsharpyuv is supplied by the listed WebP 1.6.0 source.",
+    "FriBiDi implementation and libimagequant are not bundled in these wheels; Pillow-authored fribidi-shim and raqm0.11.0 source/patches are included in the full Pillow source.",
+    "Mac /usr/lib/libbz2 and Apple framework/system libraries are supplied by the OS and are not redistributed as Pillow private native libraries.",
+    "Access-only source records identify exact original third-party releases/commits and recipes; they are not falsely marked as downloaded archives."
+  ],
+  "sources": [
+    {
+      "name": "pillow-libjpeg",
+      "component": "libjpeg-turbo",
+      "version": "3.2.0",
+      "filename": "libjpeg-turbo-3.2.0.tar.gz",
+      "urls": [
+        "https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/3.2.0/libjpeg-turbo-3.2.0.tar.gz"
+      ],
+      "license": "IJG AND BSD-3-Clause AND Zlib",
+      "platforms": [
+        "macos-arm64",
+        "windows-x64"
+      ],
+      "role": "Pillow 13.0.0 retained native image/font dependency; version pinned by exact producer recipe and wheel SBOM",
+      "sha256": "6f30092cef9fb839779646608f4ee14ae3cbac989c47fa05e841b0841f09878e",
+      "bytes": 2537858
+    },
+    {
+      "name": "pillow-zlib",
+      "component": "zlib-ng",
+      "version": "2.3.3",
+      "filename": "zlib-ng-2.3.3.tar.gz",
+      "urls": [
+        "https://github.com/zlib-ng/zlib-ng/archive/refs/tags/2.3.3.tar.gz"
+      ],
+      "license": "Zlib",
+      "platforms": [
+        "macos-arm64",
+        "windows-x64"
+      ],
+      "role": "Pillow 13.0.0 retained native image/font dependency; version pinned by exact producer recipe and wheel SBOM",
+      "sha256": "f9c65aa9c852eb8255b636fd9f07ce1c406f061ec19a2e7d508b318ca0c907d1",
+      "bytes": 2447397
+    },
+    {
+      "name": "pillow-xz",
+      "component": "XZ/liblzma",
+      "version": "5.8.4",
+      "filename": "xz-5.8.4.tar.gz",
+      "urls": [
+        "https://github.com/tukaani-project/xz/releases/download/v5.8.4/xz-5.8.4.tar.gz"
+      ],
+      "license": "0BSD",
+      "platforms": [
+        "macos-arm64",
+        "windows-x64"
+      ],
+      "role": "Pillow retained liblzma 5.8.4 dependency; library code is 0BSD, while the complete upstream archive separately carries its build/tool licences",
+      "sha256": "0014c7886930454fe8bd4228665b51af55eeae560ea135c9c4cd33f55b2591d9",
+      "bytes": 2799797
+    },
+    {
+      "name": "pillow-libwebp",
+      "component": "libwebp / libsharpyuv",
+      "version": "1.6.0",
+      "filename": "libwebp-1.6.0.tar.gz",
+      "urls": [
+        "https://storage.googleapis.com/downloads.webmproject.org/releases/webp/libwebp-1.6.0.tar.gz"
+      ],
+      "license": "BSD-3-Clause",
+      "platforms": [
+        "macos-arm64",
+        "windows-x64"
+      ],
+      "role": "Pillow 13.0.0 retained native image/font dependency; version pinned by exact producer recipe and wheel SBOM",
+      "sha256": "e4ab7009bf0629fd11982d4c2aa83964cf244cffba7347ecd39019a9e38c4564",
+      "bytes": 4296070
+    },
+    {
+      "name": "pillow-libtiff",
+      "component": "libtiff",
+      "version": "4.7.2",
+      "filename": "tiff-4.7.2.tar.gz",
+      "urls": [
+        "https://download.osgeo.org/libtiff/tiff-4.7.2.tar.gz"
+      ],
+      "license": "libtiff",
+      "platforms": [
+        "macos-arm64",
+        "windows-x64"
+      ],
+      "role": "Pillow 13.0.0 retained native image/font dependency; version pinned by exact producer recipe and wheel SBOM",
+      "sha256": "672bd7d10aee4606171afb864f3570b83340f6a33e2c186dc0512f7145ffdf6a",
+      "bytes": 4083368
+    },
+    {
+      "name": "pillow-libpng",
+      "component": "libpng",
+      "version": "1.6.58",
+      "filename": "libpng-1.6.58.tar.gz",
+      "urls": [
+        "https://downloads.sourceforge.net/project/libpng/libpng16/1.6.58/libpng-1.6.58.tar.gz",
+        "https://sourceforge.net/projects/libpng/files/libpng16/1.6.58/libpng-1.6.58.tar.gz/download"
+      ],
+      "license": "Libpng-2.0",
+      "platforms": [
+        "macos-arm64",
+        "windows-x64"
+      ],
+      "role": "Pillow 13.0.0 retained native image/font dependency; version pinned by exact producer recipe and wheel SBOM",
+      "sha256": "8c9b05b675ca7301a458df2c2e46f26e1d41ff36b8863f8c33530bc58c2e6225",
+      "bytes": 1582074
+    },
+    {
+      "name": "pillow-brotli",
+      "component": "Brotli",
+      "version": "1.2.0",
+      "filename": "brotli-1.2.0.tar.gz",
+      "urls": [
+        "https://github.com/google/brotli/archive/refs/tags/v1.2.0.tar.gz"
+      ],
+      "license": "MIT",
+      "platforms": [
+        "macos-arm64",
+        "windows-x64"
+      ],
+      "role": "Pillow 13.0.0 retained native image/font dependency; version pinned by exact producer recipe and wheel SBOM",
+      "sha256": "816c96e8e8f193b40151dad7e8ff37b1221d019dbcb9c35cd3fadbfe6477dfec",
+      "bytes": 646315
+    },
+    {
+      "name": "pillow-lcms2",
+      "component": "LittleCMS",
+      "version": "2.19.1",
+      "filename": "lcms2-2.19.1.tar.gz",
+      "urls": [
+        "https://downloads.sourceforge.net/project/lcms/lcms/2.19.1/lcms2-2.19.1.tar.gz",
+        "https://sourceforge.net/projects/lcms/files/lcms/2.19.1/lcms2-2.19.1.tar.gz/download"
+      ],
+      "license": "MIT",
+      "platforms": [
+        "macos-arm64",
+        "windows-x64"
+      ],
+      "role": "Pillow 13.0.0 retained native image/font dependency; version pinned by exact producer recipe and wheel SBOM",
+      "sha256": "bfc54f7bab59fbc921012014a8032e4cba4abd46db47d46b76416a8c0b2815c8",
+      "bytes": 5728743
+    },
+    {
+      "name": "pillow-openjpeg",
+      "component": "OpenJPEG",
+      "version": "2.5.4",
+      "filename": "openjpeg-2.5.4.tar.gz",
+      "urls": [
+        "https://github.com/uclouvain/openjpeg/archive/v2.5.4.tar.gz"
+      ],
+      "license": "BSD-2-Clause",
+      "platforms": [
+        "macos-arm64",
+        "windows-x64"
+      ],
+      "role": "Pillow 13.0.0 retained native image/font dependency; version pinned by exact producer recipe and wheel SBOM",
+      "sha256": "a695fbe19c0165f295a8531b1e4e855cd94d0875d2f88ec4b61080677e27188a",
+      "bytes": 2157028
+    },
+    {
+      "name": "pillow-libavif",
+      "component": "libavif",
+      "version": "1.4.2",
+      "filename": "libavif-1.4.2.tar.gz",
+      "urls": [
+        "https://github.com/AOMediaCodec/libavif/archive/v1.4.2.tar.gz"
+      ],
+      "license": "BSD-2-Clause",
+      "platforms": [
+        "macos-arm64",
+        "windows-x64"
+      ],
+      "role": "Pillow 13.0.0 retained native image/font dependency; version pinned by exact producer recipe and wheel SBOM",
+      "sha256": "2b645287340ba5a631d268b551dc2d72bd73ac33335962dd36dcdb6d8366921d",
+      "bytes": 14665927
+    },
+    {
+      "name": "pillow-dav1d",
+      "component": "dav1d",
+      "version": "1.5.3",
+      "filename": "dav1d-1.5.3.tar.bz2",
+      "urls": [
+        "https://downloads.videolan.org/pub/videolan/dav1d/1.5.3/dav1d-1.5.3.tar.bz2"
+      ],
+      "license": "BSD-2-Clause",
+      "platforms": [
+        "macos-arm64",
+        "windows-x64"
+      ],
+      "role": "Pillow libavif 1.4.2 transitive native dependency; exact tag/commit from cmake/Modules/Local*.cmake",
+      "sha256": "e099f53253f6c247580c554d53a13f1040638f2066edc3c740e4c2f15174ce22",
+      "bytes": 1217030
+    }
+  ],
+  "source_access": [
+    {
+      "name": "pillow-freetype",
+      "component": "FreeType",
+      "version": "2.14.3",
+      "filename": "freetype-2.14.3.tar.gz",
+      "urls": [
+        "https://download.savannah.gnu.org/releases/freetype/freetype-2.14.3.tar.gz"
+      ],
+      "license": "FTL",
+      "platforms": [
+        "macos-arm64",
+        "windows-x64"
+      ],
+      "role": "Pillow 13.0.0 retained native image/font dependency; version pinned by exact producer recipe and wheel SBOM",
+      "cached": false,
+      "access": "Exact upstream release source and original producer recipe; permissive component source access retained separately"
+    },
+    {
+      "name": "pillow-harfbuzz",
+      "component": "HarfBuzz",
+      "version": "14.5.0",
+      "filename": "harfbuzz-14.5.0.tar.xz",
+      "urls": [
+        "https://github.com/harfbuzz/harfbuzz/releases/download/14.5.0/harfbuzz-14.5.0.tar.xz"
+      ],
+      "license": "MIT",
+      "platforms": [
+        "macos-arm64",
+        "windows-x64"
+      ],
+      "role": "Pillow 13.0.0 retained native image/font dependency; version pinned by exact producer recipe and wheel SBOM",
+      "cached": false,
+      "access": "Exact upstream release source and original producer recipe; permissive component source access retained separately"
+    },
+    {
+      "name": "pillow-aom",
+      "component": "AOM",
+      "version": "3.14.1",
+      "filename": "libaom-3.14.1.tar.gz",
+      "urls": [
+        "https://aomedia.googlesource.com/aom/+archive/refs/tags/v3.14.1.tar.gz"
+      ],
+      "license": "BSD-3-Clause",
+      "platforms": [
+        "macos-arm64",
+        "windows-x64"
+      ],
+      "role": "Pillow libavif 1.4.2 transitive native dependency; exact tag/commit from cmake/Modules/Local*.cmake",
+      "cached": false,
+      "access": "Exact immutable upstream source tag/commit"
+    },
+    {
+      "name": "pillow-libyuv",
+      "component": "libyuv",
+      "version": "644251f252a84bf8ce91ff0aca86a9b16b069ab8",
+      "filename": "libyuv-644251f252a84bf8ce91ff0aca86a9b16b069ab8.tar.gz",
+      "urls": [
+        "https://chromium.googlesource.com/libyuv/libyuv/+archive/644251f252a84bf8ce91ff0aca86a9b16b069ab8.tar.gz"
+      ],
+      "license": "BSD-3-Clause",
+      "platforms": [
+        "macos-arm64",
+        "windows-x64"
+      ],
+      "role": "Pillow libavif 1.4.2 transitive native dependency; exact tag/commit from cmake/Modules/Local*.cmake",
+      "cached": false,
+      "access": "Exact immutable upstream source tag/commit"
+    },
+    {
+      "name": "pillow-libxcb",
+      "component": "libxcb",
+      "version": "1.17.0",
+      "urls": [
+        "https://www.x.org/releases/individual/lib/libxcb-1.17.0.tar.gz"
+      ],
+      "license": "MIT",
+      "platforms": [
+        "macos-arm64"
+      ],
+      "role": "Retained Mac XCB image-display library; exact version from Pillow producer .github/workflows/wheels-dependencies.sh",
+      "cached": false,
+      "access": "Exact upstream release source access"
+    },
+    {
+      "name": "pillow-libxau",
+      "component": "libXau",
+      "version": "1.0.12",
+      "urls": [
+        "https://www.x.org/pub/individual/lib/libXau-1.0.12.tar.gz"
+      ],
+      "license": "MIT",
+      "platforms": [
+        "macos-arm64"
+      ],
+      "role": "Retained Mac libxcb authentication dependency; exact version from Pillow producer .github/workflows/wheels-dependencies.sh",
+      "cached": false,
+      "access": "Exact upstream release source access"
+    },
+    {
+      "name": "pillow-xcb-proto",
+      "component": "xcb-proto",
+      "version": "1.17.0",
+      "urls": [
+        "https://xorg.freedesktop.org/archive/individual/proto/xcb-proto-1.17.0.tar.gz"
+      ],
+      "license": "MIT",
+      "platforms": [
+        "macos-arm64"
+      ],
+      "role": "Build-time XCB protocol definitions; exact version from Pillow producer .github/workflows/wheels-dependencies.sh",
+      "cached": false,
+      "access": "Exact upstream release source access"
+    },
+    {
+      "name": "pillow-xorgproto",
+      "component": "xorgproto",
+      "version": "2025.1",
+      "urls": [
+        "https://www.x.org/pub/individual/proto/xorgproto-2025.1.tar.gz"
+      ],
+      "license": "MIT",
+      "platforms": [
+        "macos-arm64"
+      ],
+      "role": "Build-time X11 protocol headers; exact version from Pillow producer .github/workflows/wheels-dependencies.sh",
+      "cached": false,
+      "access": "Exact upstream release source access"
+    },
+    {
+      "name": "pillow-libpthread-stubs",
+      "component": "libpthread-stubs",
+      "version": "0.5",
+      "urls": [
+        "https://xcb.freedesktop.org/dist/libpthread-stubs-0.5.tar.gz"
+      ],
+      "license": "MIT",
+      "platforms": [
+        "macos-arm64"
+      ],
+      "role": "Build-time XCB platform stubs; exact version from Pillow producer .github/workflows/wheels-dependencies.sh",
+      "cached": false,
+      "access": "Exact upstream release source access"
+    },
+    {
+      "name": "pillow-producer",
+      "component": "Pillow complete original producer repository",
+      "version": "13.0.0",
+      "commit": "293218ad059d994baf1777d882911bed6a49704a",
+      "urls": [
+        "https://github.com/python-pillow/Pillow/tree/293218ad059d994baf1777d882911bed6a49704a",
+        "https://codeload.github.com/python-pillow/Pillow/tar.gz/293218ad059d994baf1777d882911bed6a49704a"
+      ],
+      "license": "MIT-CMU",
+      "platforms": [
+        "macos-arm64",
+        "windows-x64"
+      ],
+      "role": "Exact unmodified Pillow release source, CMake/MSBuild patches, wheel recipes and source dependency versions",
+      "cached": false
+    },
+    {
+      "name": "pillow-multibuild",
+      "component": "Pillow multibuild helper submodule",
+      "commit": "c893f305c6066b6d940e10d3333be8cb27fa3947",
+      "urls": [
+        "https://github.com/multi-build/multibuild/tree/c893f305c6066b6d940e10d3333be8cb27fa3947",
+        "https://codeload.github.com/multi-build/multibuild/tar.gz/c893f305c6066b6d940e10d3333be8cb27fa3947"
+      ],
+      "license": "BSD-2-Clause",
+      "platforms": [
+        "macos-arm64"
+      ],
+      "role": "Exact producer gitlink recorded by Pillow commit tree",
+      "cached": false
+    }
+  ]
+}
