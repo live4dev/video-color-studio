@@ -51,7 +51,23 @@ GUI предлагает MOV для MP4-несовместимого звука;
 
 ## Готовая сборка
 
-Сборки и архивы находятся в `dist/`. На macOS распакуйте ZIP и откройте
+Публичные исходники: [live4dev/video-color-studio](https://github.com/live4dev/video-color-studio).
+Готовые архивы и соответствующие исходники зависимостей:
+[релиз 0.4.0](https://github.com/live4dev/video-color-studio/releases/tag/v0.4.0).
+Это предварительный выпуск: macOS arm64 проверена на текущем Mac,
+Windows x64 помечена **UNTESTED** — фактического запуска на Windows пока не было.
+Intel Mac и чистая macOS 13 также не проверены.
+
+| Платформа | Загрузка | Проверка |
+| --- | --- | --- |
+| macOS Apple Silicon | [ZIP приложения](https://github.com/live4dev/video-color-studio/releases/download/v0.4.0/Freedive-Color-Studio-macOS-arm64.zip) | Фото, видео, MCP; запуск на macOS arm64 |
+| Windows 10/11 x64 | [Portable ZIP — UNTESTED](https://github.com/live4dev/video-color-studio/releases/download/v0.4.0/Freedive_Color_Studio_Windows_x64_UNTESTED.zip) | Статическая проверка; запуск на Windows не выполнен |
+
+В релизе находятся `SHA256SUMS.txt`, описания сборок и отдельные source ZIP для
+каждой платформы. Собственный код — MIT; комбинированные дистрибутивы с
+FFmpeg/x264/x265 — GPLv3. Подробнее: [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
+
+Локальные сборки находятся в `dist/`. На macOS распакуйте ZIP и откройте
 **Freedive Color Studio.app**. На Windows откройте приложение из portable-папки.
 Python, pip, установленный FFmpeg и терминал конечному пользователю не нужны.
 Статус конкретных артефактов и неподтверждённые платформы перечислены в TESTING.md.
