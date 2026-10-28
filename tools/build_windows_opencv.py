@@ -106,6 +106,14 @@ def digest(path: Path) -> str:
     return h.hexdigest()
 
 
+def build_log_tail(path: Path) -> str:
+    """Keep the actual compiler failure visible when a CI build directory is ephemeral."""
+    with path.open("rb") as log:
+        log.seek(0, os.SEEK_END)
+        log.seek(max(0, log.tell() - 16384))
+        return "\n".join(log.read().decode("utf-8", errors="replace").splitlines()[-60:])
+
+
 def prepare_sdk(work: Path, numpy_wheel: Path, *, offline: bool = False) -> tuple[Path, Path]:
     sdk = work / "sdk"
     sdk.mkdir(exist_ok=True)
@@ -218,7 +226,11 @@ def build(work: Path, cache: Path, zig_path: Path | None, jobs: int, offline: bo
             if process.returncode:
                 manifest.update(status="failed", returncode=process.returncode)
                 manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-                raise RuntimeError(f"Windows OpenCV build failed; inspect {work / 'build.log'}")
+                log.flush()
+                raise RuntimeError(
+                    f"Windows OpenCV build failed; inspect {work / 'build.log'}\n"
+                    f"Last build output:\n{build_log_tail(work / 'build.log')}"
+                )
     binaries = list((work / "cmake").rglob("cv2*.pyd"))
     if not binaries:
         # The binding generator gets its suffix from the host interpreter. The

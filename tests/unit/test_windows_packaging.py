@@ -136,6 +136,54 @@ def test_real_project_resolves_windows_profile_and_stable_abi_wheels(win):
     assert all(len(entry["sha256"]) == 64 for entry in wheels)
 
 
+def test_windows_build_failure_keeps_bounded_unicode_compiler_diagnostic(win, tmp_path):
+    opencv = importlib.import_module("tools.build_windows_opencv")
+    log = tmp_path / "build.log"
+    log.write_bytes(
+        b"old configuration output\n" * 2000
+        + "\n".join(f"compile {index}" for index in range(80)).encode("utf-8")
+        + "\nclang: error: Не найден заголовок\n".encode()
+    )
+    tail = opencv.build_log_tail(log)
+    assert len(tail.splitlines()) == 60
+    assert tail.endswith("clang: error: Не найден заголовок")
+    assert "old configuration output" not in tail
+    assert len(tail.encode("utf-8")) <= 16384
+
+
+def test_windows_opencv_failed_command_surfaces_compiler_error(win, tmp_path, monkeypatch):
+    import sys
+
+    opencv = importlib.import_module("tools.build_windows_opencv")
+    work = tmp_path / "work"
+    (work / "source/opencv_python_headless-4.14.0.94/opencv").mkdir(parents=True)
+    archive = tmp_path / "build/opencv-image-only/source/opencv_python_headless-4.14.0.94.tar.gz"
+    archive.parent.mkdir(parents=True)
+    archive.touch()
+    failure = tmp_path / "failing-cmake.py"
+    failure.write_text(
+        "import sys\n"
+        "sys.stdout.buffer.write('clang: error: native header unavailable\\n'.encode('utf-8'))\n"
+        "raise SystemExit(23)\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(opencv, "ROOT", tmp_path)
+    monkeypatch.setattr(opencv, "digest", lambda path: opencv.SOURCE_SHA)
+    monkeypatch.setattr(opencv, "compiler", lambda *args, **kwargs: tmp_path / "zig")
+    monkeypatch.setattr(opencv, "locked_wheels", lambda: [{"package": "numpy"}])
+    monkeypatch.setattr(opencv, "acquire", lambda *args, **kwargs: tmp_path / "numpy.whl")
+    monkeypatch.setattr(
+        opencv, "prepare_sdk", lambda *args, **kwargs: (tmp_path / "python", tmp_path / "numpy")
+    )
+    host = dict.fromkeys(("cc", "cxx", "ar", "ranlib", "rc"), "unused-tool")
+    host.update(cmake=[sys.executable, str(failure)], generator="Ninja", environment={})
+    monkeypatch.setattr(opencv, "host_plan", lambda *args: host)
+    with pytest.raises(RuntimeError, match="clang: error: native header unavailable"):
+        opencv.build(work, tmp_path / "cache", None, 1, True)
+    manifest = json.loads((work / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["status"] == "failed" and manifest["returncode"] == 23
+
+
 def test_final_zip_requires_positive_matching_windows_source_scope(win, tmp_path):
     stage = tmp_path / "stage"
     stage.mkdir()

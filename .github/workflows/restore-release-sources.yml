@@ -1,0 +1,45 @@
+name: Restore exact corresponding-source release archives
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing draft release tag
+        required: true
+        default: v0.4.0
+      kit_sha256:
+        description: SHA-256 of the source-reconstruction-kit.zip asset
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: restore-release-sources-${{ github.event.inputs.release_tag }}
+  cancel-in-progress: false
+
+jobs:
+  restore:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ github.event.inputs.release_tag }}
+      KIT_SHA256: ${{ github.event.inputs.kit_sha256 }}
+    steps:
+      - name: Verify kit, restore exact source bytes and upload to draft
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$KIT_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true
+          gh release download "$RELEASE_TAG" --pattern source-reconstruction-kit.zip
+          printf '%s  %s\n' "$KIT_SHA256" source-reconstruction-kit.zip | sha256sum -c -
+          python3 -m zipfile -e source-reconstruction-kit.zip restore-kit
+          python3 restore-kit/reconstruct.py \
+            --kit source-reconstruction-kit.zip --kit-sha256 "$KIT_SHA256" \
+            --download-cache downloaded-sources --output-dir restored-sources --workers 8
+          test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true
+          gh release upload "$RELEASE_TAG" restored-sources/*.zip --clobber
