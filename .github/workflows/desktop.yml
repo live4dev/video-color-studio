@@ -1,6 +1,7 @@
 name: Desktop photo-video tests and standalone packages
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 permissions:
@@ -58,4 +59,10 @@ jobs:
           path: |
             dist/*.zip
             dist/*.json
-            artifacts/
+            artifacts/tests.xml
+            artifacts/latest-bundle-smoke.json
+            artifacts/macos-targets.json
+            artifacts/**/installation-test.json
+            artifacts/**/windows-native.json
+            artifacts/ci-mcp-smoke/result.json
+            !artifacts/**/private-control/**

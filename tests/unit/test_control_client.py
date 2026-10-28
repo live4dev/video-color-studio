@@ -1,3 +1,4 @@
+import os
 import sys
 from pathlib import Path
 
@@ -32,8 +33,9 @@ def test_source_configuration_keeps_venv_python_not_resolved_symlink(monkeypatch
 def test_frozen_discovery_and_unicode_space_paths(monkeypatch, tmp_path):
     parent = tmp_path / "Приложения с пробелами"
     parent.mkdir()
-    adapter = parent / "freedive-color-mcp"
-    desktop = parent / "Freedive Color Studio"
+    suffix = ".exe" if os.name == "nt" else ""
+    adapter = parent / f"freedive-color-mcp{suffix}"
+    desktop = parent / f"Freedive Color Studio{suffix}"
     adapter.touch()
     desktop.touch()
     monkeypatch.setattr(sys, "frozen", True, raising=False)
