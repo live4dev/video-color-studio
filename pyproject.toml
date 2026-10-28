@@ -36,6 +36,7 @@ packages = ["src/freedive_color"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 qt_api = "pyside6"
 filterwarnings = ["error::RuntimeWarning"]
 

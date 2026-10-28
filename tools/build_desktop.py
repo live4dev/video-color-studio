@@ -115,14 +115,18 @@ def build() -> None:
             for chunk in iter(lambda: handle.read(1024 * 1024), b""):
                 digest.update(chunk)
         source_record = json.loads(
-            (ROOT / "dist/Freedive_Color_Studio_Corresponding_Source.json").read_text()
+            (ROOT / "dist/Freedive_Color_Studio_Corresponding_Source.json").read_text(
+                encoding="utf-8"
+            )
         )
         release = {
             "archive": str(archive.relative_to(ROOT)),
             "sha256": digest.hexdigest(),
             "bytes": archive.stat().st_size,
             "platform": "macOS-" + architecture,
-            "version": tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["version"],
+            "version": tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))[
+                "project"
+            ]["version"],
             "minimum_os": "13.0",
             "signature": "ad-hoc; no Developer ID or notarization",
             "corresponding_source": source_record,

@@ -224,7 +224,9 @@ def test_local_settings_masks_and_frozen_reference_reach_real_export(tmp_path):
     result = export_batch((item,), tmp_path / "output", reference=reference)
     assert result.completed == 1 and result.failed == 0
     record = result.records[0]
-    report = json.loads(record.destination.with_suffix(".png.freedive.json").read_text())
+    report = json.loads(
+        record.destination.with_suffix(".png.freedive.json").read_text(encoding="utf-8")
+    )
     assert report["local_settings"]["skin_warmth"] == 0.23456
     assert report["mask_edits"]["waterline"] == [[0.0, 0.2], [1.0, 0.25]]
     assert report["reference"]["source_name"] == "Frozen edited frame"

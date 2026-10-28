@@ -363,7 +363,9 @@ def decode_video_frame(frame, info: VideoInfo | None = None) -> np.ndarray:
     )
     converted = av.video.reformatter.VideoReformatter().reformat(
         frame,
-        format="rgb48le",
+        # libswscale 9 corrupts packed RGB48 pixels with accurate rounding.
+        # Planar 16-bit RGB keeps the precision; PyAV returns it as RGB HWC.
+        format="gbrp16le",
         src_colorspace=matrix,
         dst_colorspace="ITU709",
         src_color_range="JPEG"

@@ -39,7 +39,7 @@ def test_session_roundtrip_relative_paths_and_exact_values(tmp_path, monkeypatch
         export_options=ExportOptions(".tiff", 16, 93, True),
     )
     save_session(project, session)
-    raw = json.loads(project.read_text())
+    raw = json.loads(project.read_text(encoding="utf-8"))
     assert raw["items"][0]["path"] == "photos/погружение.png"
     assert raw["reference_path"] == "photos/reference.jpg"
     other = tmp_path / "other-cwd"
@@ -107,7 +107,7 @@ def test_local_state_is_not_shared_with_mutable_caller_dictionaries(photo_path):
 
 def test_save_as_does_not_overwrite_existing_project_or_foreign_json(tmp_path):
     path = tmp_path / "existing.json"
-    path.write_text('{"kind": "preset", "schema_version": 1, "settings": {}}')
+    path.write_text('{"kind": "preset", "schema_version": 1, "settings": {}}', encoding="utf-8")
     original = path.read_bytes()
     with pytest.raises(StudioError):
         save_session(path, Session())
@@ -133,7 +133,9 @@ def test_failed_atomic_update_preserves_saved_project(tmp_path, monkeypatch):
 
 def test_project_path_cannot_replace_a_declared_source(tmp_path):
     source = tmp_path / "source.json"
-    source.write_text('{"schema_version": 1, "kind": "freedive_project", "items": []}')
+    source.write_text(
+        '{"schema_version": 1, "kind": "freedive_project", "items": []}', encoding="utf-8"
+    )
     original = source.read_bytes()
     with pytest.raises(StudioError, match="защищён"):
         save_session(source, Session((SessionItem(source),)), overwrite=True)
@@ -144,7 +146,8 @@ def test_project_path_cannot_replace_a_declared_source(tmp_path):
 def test_unknown_or_wrongly_typed_schema_is_rejected(tmp_path, version):
     path = tmp_path / "project.json"
     path.write_text(
-        json.dumps({"schema_version": version, "kind": "freedive_project", "items": []})
+        json.dumps({"schema_version": version, "kind": "freedive_project", "items": []}),
+        encoding="utf-8",
     )
     with pytest.raises(StudioError, match="Версия"):
         load_session(path)
@@ -154,7 +157,8 @@ def test_unknown_or_wrongly_typed_schema_is_rejected(tmp_path, version):
 def test_unknown_fields_and_bad_item_types_rejected(tmp_path, extra):
     path = tmp_path / "project.json"
     path.write_text(
-        json.dumps({"schema_version": 1, "kind": "freedive_project", "items": [], **extra})
+        json.dumps({"schema_version": 1, "kind": "freedive_project", "items": [], **extra}),
+        encoding="utf-8",
     )
     with pytest.raises(StudioError):
         load_session(path)

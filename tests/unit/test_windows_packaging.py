@@ -139,28 +139,31 @@ def test_real_project_resolves_windows_profile_and_stable_abi_wheels(win):
 def test_final_zip_requires_positive_matching_windows_source_scope(win, tmp_path):
     stage = tmp_path / "stage"
     stage.mkdir()
-    (stage / "payload.txt").write_text("staged source")
+    (stage / "payload.txt").write_text("staged source", encoding="utf-8")
     manifest = {
         "kind": "freedive_windows_portable",
         "files": win.file_hashes(stage),
         "payload_sha256": "a" * 64,
         "opencv_native": {"status": "built"},
     }
-    (stage / win.MANIFEST).write_text(json.dumps(manifest))
+    (stage / win.MANIFEST).write_text(json.dumps(manifest), encoding="utf-8")
     marker = tmp_path / "source.json"
-    marker.write_text(json.dumps({"complete": True, "scope": "Windows not asserted"}))
+    marker.write_text(
+        json.dumps({"complete": True, "scope": "Windows not asserted"}), encoding="utf-8"
+    )
     output = tmp_path / "release.zip"
     with pytest.raises(ValueError, match="explicitly cover Windows"):
         win.finalize(stage, output, marker)
     marker.write_text(
         json.dumps(
             {"complete": True, "platforms": ["windows-x64"], "windows_payload_sha256": "b" * 64}
-        )
+        ),
+        encoding="utf-8",
     )
     with pytest.raises(ValueError, match="does not match"):
         win.finalize(stage, output, marker)
     assert not output.exists()
-    (stage / "payload.txt").write_text("changed")
+    (stage / "payload.txt").write_text("changed", encoding="utf-8")
     with pytest.raises(ValueError, match="Staged application changed"):
         win.finalize(stage, output, marker)
 
@@ -169,7 +172,7 @@ def test_native_opencv_replaces_entire_stock_package_and_verifies_export(win, tm
     package = tmp_path / "compiled/cv2"
     package.mkdir(parents=True)
     (package / "cv2.pyd").write_bytes(opencv_pe())
-    (package / "__init__.py").write_text("from .cv2 import *\n")
+    (package / "__init__.py").write_text("from .cv2 import *\n", encoding="utf-8")
     manifest = {
         "status": "built",
         "platform": "windows-x64",
@@ -179,7 +182,7 @@ def test_native_opencv_replaces_entire_stock_package_and_verifies_export(win, tm
         "files": {p.name: win.sha256(p) for p in package.iterdir()},
     }
     manifest_path = tmp_path / "native.json"
-    manifest_path.write_text(json.dumps(manifest))
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     stage = tmp_path / "stage"
     stock = stage / "runtime/Lib/site-packages/cv2"
     stock.mkdir(parents=True)
@@ -206,7 +209,8 @@ def test_native_opencv_hash_failure_preserves_previous_package(win, tmp_path):
                 "package_directory": str(package),
                 "files": {"cv2.pyd": "0" * 64},
             }
-        )
+        ),
+        encoding="utf-8",
     )
     stage = tmp_path / "stage"
     stock = stage / "runtime/Lib/site-packages/cv2"
@@ -230,7 +234,8 @@ def test_no_native_pass_record_is_emitted_on_a_different_os(win, tmp_path, monke
                 "payload_sha256": "a" * 64,
                 "opencv_native": {"status": "built"},
             }
-        )
+        ),
+        encoding="utf-8",
     )
     monkeypatch.setattr(checker.platform, "system", lambda: "Darwin")
     output = tmp_path / "proof.json"
@@ -309,6 +314,8 @@ def test_native_checker_rejects_non_protocol_stdio_output(win, tmp_path):
 
     checker = importlib.import_module("tools.check_windows_portable")
     broken = tmp_path / "wrong-stdout.py"
-    broken.write_text("import time;print('diagnostic on stdout',flush=True);time.sleep(30)")
+    broken.write_text(
+        "import time;print('diagnostic on stdout',flush=True);time.sleep(30)", encoding="utf-8"
+    )
     with pytest.raises((ValueError, json.JSONDecodeError)):
         checker.check_mcp_stdio([sys.executable, str(broken)], dict(os.environ), tmp_path)

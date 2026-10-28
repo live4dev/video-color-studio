@@ -229,7 +229,7 @@ def test_live_preview_rgb_never_in_public_job_or_journal(controller, app, tmp_pa
     assert job["result"]["width"] == 96
     encoded = json.dumps(job)
     assert '"rgb"' not in encoded and '"alpha"' not in encoded
-    journal = (tmp_path / "jobs.json").read_text()
+    journal = (tmp_path / "jobs.json").read_text(encoding="utf-8")
     assert '"rgb"' not in journal and "ndarray" not in journal
 
 
@@ -296,7 +296,7 @@ def test_real_photo_import_preview_export_dedupe_and_exact_recipe(controller, ap
         == export["job_id"]
     )
     for row, expected in zip(completed["result"]["records"], [0.0, 0.35, 0.0], strict=True):
-        recipe = json.loads(Path(row["recipe_path"]).read_text())
+        recipe = json.loads(Path(row["recipe_path"]).read_text(encoding="utf-8"))
         assert recipe["settings"]["exposure"] == expected
 
 
@@ -317,7 +317,8 @@ def test_restart_marks_unfinished_interrupted_no_auto_export(app, tmp_path):
                     }
                 ],
             }
-        )
+        ),
+        encoding="utf-8",
     )
     value = ProjectController(journal_path=path)
     assert value.get_job("old")["status"] == "interrupted"
@@ -332,7 +333,7 @@ def test_project_save_load_new_ids_compatible_and_busy_rejected(controller, app,
     path = tmp_path / "project.fcsproj"
     job = call(controller, "save_project", path=str(path))["job_id"]
     assert wait(app, controller, job)["status"] == "succeeded"
-    saved = path.read_text()
+    saved = path.read_text(encoding="utf-8")
     assert "media_id" not in saved and "session_id" not in saved
     entered, release = threading.Event(), threading.Event()
 

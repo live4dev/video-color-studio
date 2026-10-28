@@ -89,7 +89,7 @@ def test_group_remote_grade_and_manual_edits_share_revisions(shared_window, qtbo
     window.save_project(project)
     saved = load_session(project)
     assert saved.items == controller.get_session().items
-    assert "media_id" not in project.read_text()
+    assert "media_id" not in project.read_text(encoding="utf-8")
     old_ids = {record.media_id for record in controller.records()}
     window.load_project(project)
     _ready(qtbot, window)

@@ -20,7 +20,7 @@ from freedive_color.core.session import Session, SessionItem, save_session
 def local_edits_file(tmp_path):
     path = tmp_path / "masks.json"
     edits = MaskEdits(strokes=(BrushStroke(target="water", points=((0.7, 0.3),)),))
-    path.write_text(json.dumps(edits.to_dict()))
+    path.write_text(json.dumps(edits.to_dict()), encoding="utf-8")
     return path
 
 
@@ -180,7 +180,7 @@ def test_local_recipe_replay_is_pixel_identical(photo_path, tmp_path, capsys):
 
 def test_bad_mask_json_produces_an_actionable_cli_error(photo_path, tmp_path, capsys):
     path = tmp_path / "bad-mask.json"
-    path.write_text("[]")
+    path.write_text("[]", encoding="utf-8")
     assert (
         run(
             [

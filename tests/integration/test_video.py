@@ -101,7 +101,10 @@ def test_vfr_full_export_preserves_every_pts_audio_packet_offset_and_tail(videos
     assert report["verification"]["audio_tracks"][0]["packets_identical"]
     assert sha256_file(source) == before
     sidecar = output.with_suffix(".mp4.freedive.json")
-    assert ShotPlan.from_dict(json.loads(sidecar.read_text())["plan"]).to_dict() == report["plan"]
+    assert (
+        ShotPlan.from_dict(json.loads(sidecar.read_text(encoding="utf-8"))["plan"]).to_dict()
+        == report["plan"]
+    )
     assert not list(tmp_path.glob(".freedive-*"))
 
 
@@ -205,17 +208,25 @@ def test_outputs_original_and_json_sidecar_are_protected(videos, tmp_path):
         export_video(source, output, get_preset("natural"))
     assert output.read_bytes() == b"user file"
     output.unlink()
-    output.with_suffix(".mp4.freedive.json").write_text("user recipe")
+    output.with_suffix(".mp4.freedive.json").write_text("user recipe", encoding="utf-8")
     with pytest.raises(StudioError, match="существует"):
         export_video(source, output, get_preset("natural"))
     assert not output.exists()
 
 
-def test_identity_rec709_range_matrix_and_transfer_round_trip():
+@pytest.mark.parametrize("width", (48, 720, 1080))
+def test_identity_rec709_range_matrix_and_transfer_round_trip(width):
     for value in (0.03, 0.18, 0.5, 0.9):
-        rgb = np.full((32, 48, 3), value, np.float32)
+        rgb = np.full((32, width, 3), value, np.float32)
         decoded = decode_video_frame(encode_video_frame(rgb))
         assert np.max(np.abs(decoded - rgb)) < 0.012
+
+
+@pytest.mark.parametrize("color", ((0.7, 0.45, 0.25), (0.2, 0.65, 0.3), (0.1, 0.3, 0.5)))
+def test_rec709_round_trip_preserves_rgb_channel_order(color):
+    rgb = np.broadcast_to(np.array(color, np.float32), (32, 48, 3)).copy()
+    decoded = decode_video_frame(encode_video_frame(rgb))
+    assert np.max(np.abs(decoded - rgb)) < 0.012
 
 
 def _tagged_video(path, *, trc=1, sar=Fraction(1), with_audio=False):
@@ -280,7 +291,8 @@ def test_local_playlist_disguised_as_mp4_is_rejected_before_protocol_access(tmp_
     source = tmp_path / "playlist.mp4"
     source.write_text(
         "#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1,\n"
-        "https://example.invalid/segment.ts\n#EXT-X-ENDLIST\n"
+        "https://example.invalid/segment.ts\n#EXT-X-ENDLIST\n",
+        encoding="utf-8",
     )
     with pytest.raises(StudioError):
         probe_video(source)

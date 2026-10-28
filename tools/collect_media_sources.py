@@ -259,7 +259,7 @@ def audit_qt(bundle: Path | None) -> dict:
 
 def windows_inventory(bundle: Path) -> dict:
     bundle = inside_project(bundle)
-    manifest = json.loads((bundle / "BUILD-MANIFEST.json").read_text())
+    manifest = json.loads((bundle / "BUILD-MANIFEST.json").read_text(encoding="utf-8"))
     if (
         manifest.get("kind") != "freedive_windows_portable"
         or manifest.get("platform") != "windows-x64"
@@ -446,7 +446,7 @@ def collect(
     work, output = inside_project(work), inside_project(output)
     (work / "archives").mkdir(parents=True, exist_ok=True)
     lock_name = "windows-sources-lock.json" if windows_bundle else "sources-lock.json"
-    lock = json.loads((RECORDS / lock_name).read_text())
+    lock = json.loads((RECORDS / lock_name).read_text(encoding="utf-8"))
     inventory = windows_inventory(windows_bundle) if windows_bundle else native_inventory()
     if not windows_bundle:
         inventory["qt_bundle"] = audit_qt(bundle)
@@ -472,7 +472,7 @@ def collect(
     )
     if not native_manifest.is_file():
         raise RuntimeError("Build the image-only OpenCV wheel before collecting release sources")
-    native = json.loads(native_manifest.read_text())
+    native = json.loads(native_manifest.read_text(encoding="utf-8"))
     image_source = ROOT / "build/opencv-image-only/source/opencv_python_headless-4.14.0.94.tar.gz"
     if native.get("status") != "built" or sha256(image_source) != native["source_sha256"]:
         raise RuntimeError("Image-only OpenCV source manifest is not verified")

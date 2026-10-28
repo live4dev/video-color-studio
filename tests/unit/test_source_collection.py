@@ -81,7 +81,7 @@ def test_qt_bundle_unknown_module_blocks_incomplete_source_claim(tmp_path):
 
 
 def test_mcp_source_lock_includes_crypto_extras_rust_sources_and_exact_openssl():
-    lock = json.loads((collector.RECORDS / "mcp-sources-lock.json").read_text())
+    lock = json.loads((collector.RECORDS / "mcp-sources-lock.json").read_text(encoding="utf-8"))
     for entry in lock["sources"]:
         collector.validate_entry(entry)
     assert lock["required_versions"]["mcp"] == "2.3.0"
@@ -115,7 +115,7 @@ def test_mcp_version_mismatch_and_missing_source_lock_block_complete_claim(tmp_p
 
 
 def test_windows_mcp_gate_checks_staged_versions_and_openssl_before_merging(tmp_path):
-    sdk = json.loads((collector.RECORDS / "mcp-sources-lock.json").read_text())
+    sdk = json.loads((collector.RECORDS / "mcp-sources-lock.json").read_text(encoding="utf-8"))
     inventory = {
         "wheels": [
             {"package": name, "version": version}

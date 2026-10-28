@@ -108,7 +108,7 @@ async def exercise(output: Path, adapter: Path | None, application: Path | None)
             assert not registry.exists(), "MCP initialization started the desktop"
             connected = await call(client, "connect_session", {})
             session = connected["session_id"]
-            process_id = json.loads(registry.read_text())["pid"]
+            process_id = json.loads(registry.read_text(encoding="utf-8"))["pid"]
             imported = await call(
                 client,
                 "import_media",
@@ -199,11 +199,11 @@ async def exercise(output: Path, adapter: Path | None, application: Path | None)
             )
         # The SDK closes the MCP subprocess here. The desktop owns the work.
         await anyio.sleep(0.2)
-        assert json.loads(registry.read_text())["pid"] == process_id
+        assert json.loads(registry.read_text(encoding="utf-8"))["pid"] == process_id
         async with Client(parameters, read_timeout_seconds=60) as client:
             reconnected = await call(client, "connect_session", {})
             assert reconnected["session_id"] == session
-            assert json.loads(registry.read_text())["pid"] == process_id
+            assert json.loads(registry.read_text(encoding="utf-8"))["pid"] == process_id
             export_job = await wait_job(client, session, exported["job_id"])
             paths = sorted((output / "exports").glob("*.mp4"))
             assert len(paths) == 3
@@ -213,7 +213,9 @@ async def exercise(output: Path, adapter: Path | None, application: Path | None)
                 assert len(matching) == 1, (source, paths)
                 result = matching[0]
                 assert media_clocks(source) == media_clocks(result), source.name
-                recipe = json.loads(Path(str(result) + ".freedive.json").read_text())
+                recipe = json.loads(
+                    Path(str(result) + ".freedive.json").read_text(encoding="utf-8")
+                )
                 assert recipe["settings"]["temperature"] == 0.08
                 assert digest(source) == checksums[str(source)]
                 verifications.append(
@@ -279,9 +281,11 @@ def main():
     except BaseException as error:
         result = {"passed": False, "error": str(error), "error_type": type(error).__name__}
         if output.exists():
-            (output / "result.json").write_text(json.dumps(result, indent=2) + "\n")
+            (output / "result.json").write_text(
+                json.dumps(result, indent=2) + "\n", encoding="utf-8"
+            )
         raise
-    (output / "result.json").write_text(json.dumps(result, indent=2) + "\n")
+    (output / "result.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({k: v for k, v in result.items() if k != "events"}, indent=2))
 
 

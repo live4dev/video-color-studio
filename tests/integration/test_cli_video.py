@@ -22,7 +22,7 @@ def test_video_recipe_reuses_plan_and_preview_range(tmp_path, monkeypatch, capsy
         "output": {"proxy_edge": 1280},
         "preview": {"enabled": True, "requested_start": 0.75, "requested_seconds": 1.5},
     }
-    recipe.write_text(json.dumps(data))
+    recipe.write_text(json.dumps(data), encoding="utf-8")
     calls = []
 
     def export(source, destination, settings, **kwargs):

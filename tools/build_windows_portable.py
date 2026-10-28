@@ -169,8 +169,8 @@ def acquire(entry: dict, cache: Path, *, offline: bool = False) -> Path:
 
 
 def locked_wheels(project: Path = ROOT) -> list[dict]:
-    metadata = tomllib.loads((project / "pyproject.toml").read_text())
-    lock = tomllib.loads((project / "uv.lock").read_text())
+    metadata = tomllib.loads((project / "pyproject.toml").read_text(encoding="utf-8"))
+    lock = tomllib.loads((project / "uv.lock").read_text(encoding="utf-8"))
     environment = {
         **default_environment(),
         "sys_platform": "win32",
@@ -577,14 +577,14 @@ def prepare(
 def finalize(stage: Path, output: Path, marker: Path) -> dict:
     if output.exists() or output.with_suffix(".json").exists():
         raise FileExistsError("Release ZIP or JSON exists; select a new output name")
-    manifest = json.loads((stage / MANIFEST).read_text())
+    manifest = json.loads((stage / MANIFEST).read_text(encoding="utf-8"))
     if manifest.get("kind") != "freedive_windows_portable":
         raise ValueError("Not a generated Windows portable stage")
     if file_hashes(stage) != manifest["files"]:
         raise ValueError("Staged application changed; rebuild before release")
     if not manifest.get("opencv_native"):
         raise ValueError("Stock OpenCV is provisional; build the source-based IPP-free extension")
-    sources = json.loads(marker.read_text())
+    sources = json.loads(marker.read_text(encoding="utf-8"))
     if sources.get("complete") is not True or "windows-x64" not in sources.get("platforms", []):
         raise ValueError("Verified corresponding sources must explicitly cover Windows x64")
     if sources.get("windows_payload_sha256") != manifest["payload_sha256"]:
