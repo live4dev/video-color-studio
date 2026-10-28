@@ -501,7 +501,8 @@
       "version": "1.5.3",
       "filename": "dav1d-1.5.3.tar.bz2",
       "urls": [
-        "https://downloads.videolan.org/pub/videolan/dav1d/1.5.3/dav1d-1.5.3.tar.bz2"
+        "https://downloads.videolan.org/pub/videolan/dav1d/1.5.3/dav1d-1.5.3.tar.bz2",
+        "https://github.com/live4dev/video-color-studio/releases/download/v0.4.0/dav1d-1.5.3.tar.bz2"
       ],
       "license": "BSD-2-Clause",
       "platforms": [
