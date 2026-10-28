@@ -1,0 +1,56 @@
+name: Assemble exact release asset from temporary parts
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing draft release tag
+        required: true
+        default: v0.4.0
+      asset_name:
+        description: Complete archive filename
+        required: true
+      asset_sha256:
+        description: SHA-256 of the complete local archive
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: assemble-release-${{ github.event.inputs.release_tag }}-${{ github.event.inputs.asset_name }}
+  cancel-in-progress: false
+
+jobs:
+  assemble:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ github.event.inputs.release_tag }}
+      ASSET_NAME: ${{ github.event.inputs.asset_name }}
+      ASSET_SHA256: ${{ github.event.inputs.asset_sha256 }}
+    steps:
+      - name: Verify parts, assemble original bytes, upload and remove temporary parts
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$ASSET_NAME" =~ ^[A-Za-z0-9._-]+\.zip$ ]]
+          [[ "$ASSET_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true
+          mkdir parts
+          gh release download "$RELEASE_TAG" --pattern "$ASSET_NAME.part*" --dir parts
+          (cd parts && sha256sum -c "$ASSET_NAME.parts.sha256")
+          cat parts/"$ASSET_NAME".part[0-9][0-9] > "$ASSET_NAME"
+          printf '%s  %s\n' "$ASSET_SHA256" "$ASSET_NAME" | sha256sum -c -
+          test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true
+          gh release upload "$RELEASE_TAG" "$ASSET_NAME" --clobber
+          RELEASE_ID="$(gh api "repos/$GH_REPO/releases" --jq ".[] | select(.tag_name == \"$RELEASE_TAG\") | .id")"
+          [[ "$RELEASE_ID" =~ ^[0-9]+$ ]]
+          REMOTE_DIGEST="$(gh api "repos/$GH_REPO/releases/$RELEASE_ID/assets" --paginate --jq ".[] | select(.name == \"$ASSET_NAME\") | .digest")"
+          test "$REMOTE_DIGEST" = "sha256:$ASSET_SHA256"
+          for part in parts/"$ASSET_NAME".part*; do
+            gh release delete-asset "$RELEASE_TAG" "$(basename "$part")" --yes
+          done
