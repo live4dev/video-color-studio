@@ -1,6 +1,6 @@
 # Media evidence attribution
 
-`comparison.jpg`, `milestone-b-*`, `milestone-c-static.jpg` and
+`capcut-workspace.png`, `comparison.jpg`, `milestone-b-*`, `milestone-c-static.jpg` and
 `milestone-c-4k.jpg` derive from Andy Moreno's public-domain *Freediver, Moalboal*.
 Original and attribution: https://commons.wikimedia.org/wiki/File:Freediver_Moalboal.jpg
 
