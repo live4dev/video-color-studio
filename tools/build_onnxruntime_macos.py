@@ -101,6 +101,56 @@ def minimum_versions(commands: str) -> list[str]:
     return versions
 
 
+def retag_native_wheel(wheel: Path, directory: Path, architecture: str) -> Path:
+    """Match wheel metadata to audited native architecture, never edit Mach-O bytes.
+
+    Python's universal2 sysconfig can incorrectly tag an arm64-only source build.
+    The standard wheel utility updates WHEEL/RECORD; retain the original compiler
+    archive separately and verify that every native member remains byte-identical.
+    """
+    if architecture not in ("arm64", "x86_64"):
+        raise RuntimeError("Unsupported native wheel architecture")
+    tag = f"macosx_13_0_{architecture}"
+
+    def inspect(path):
+        with zipfile.ZipFile(path) as archive:
+            names = [name for name in archive.namelist() if name.endswith(".dist-info/WHEEL")]
+            if len(names) != 1:
+                raise RuntimeError("Wheel platform metadata is missing or ambiguous")
+            tags = [
+                line.rsplit("-", 1)[-1]
+                for line in archive.read(names[0]).decode("utf-8").splitlines()
+                if line.startswith("Tag: ")
+            ]
+            native = {}
+            for name in archive.namelist():
+                with archive.open(name) as member:
+                    if member.read(4) in MAGICS:
+                        native[name] = hashlib.sha256(archive.read(name)).hexdigest()
+            return tags, native
+
+    tags, before = inspect(wheel)
+    if tags and set(tags) == {tag} and wheel.name.endswith(f"-{tag}.whl"):
+        return wheel
+    directory.mkdir(parents=True, exist_ok=True)
+    candidate = directory / wheel.name
+    shutil.copy2(wheel, candidate)
+    result = subprocess.run(
+        [sys.executable, "-m", "wheel", "tags", "--platform-tag", tag, str(candidate)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    name = result.stdout.strip().splitlines()[-1]
+    if Path(name).name != name or not name.endswith(f"-{tag}.whl"):
+        raise RuntimeError("Wheel retagging returned an unexpected filename")
+    corrected = directory / name
+    tags, after = inspect(corrected)
+    if not tags or set(tags) != {tag} or before != after:
+        raise RuntimeError("Wheel retagging changed native bytes or left incorrect metadata")
+    return corrected
+
+
 def verify_wheel(wheel: Path, unpacked: Path, architecture: str) -> dict:
     """Reject every too-new Mach-O slice before installing anything into Python."""
     if unpacked.exists():
@@ -285,6 +335,7 @@ def build(work: Path, jobs: int, install: bool = False) -> dict:
         raise RuntimeError("Unexpected ONNX Runtime source version")
     environment = os.environ.copy()
     environment["MACOSX_DEPLOYMENT_TARGET"] = TARGET
+    environment["_PYTHON_HOST_PLATFORM"] = f"macosx-{TARGET}-{platform.machine()}"
     command = build_command(source, work, jobs, platform.machine())
     manifest = {
         "package": "onnxruntime",
@@ -313,16 +364,20 @@ def build(work: Path, jobs: int, install: bool = False) -> dict:
         built = list((work / "compile/Release/dist").glob(f"onnxruntime-{VERSION}-*.whl"))
         if len(built) != 1:
             raise RuntimeError("Expected exactly one source-built ONNX Runtime wheel")
-        verification = verify_wheel(built[0], work / "wheel-audit", platform.machine())
+        compiler_wheel = {"filename": built[0].name, "sha256": digest(built[0])}
+        tagged = retag_native_wheel(built[0], work / "wheel-tags", platform.machine())
+        verification = verify_wheel(tagged, work / "wheel-audit", platform.machine())
         wheels = work / "wheels"
         wheels.mkdir(exist_ok=True)
-        wheel = wheels / built[0].name
-        shutil.copy2(built[0], wheel)
+        wheel = wheels / tagged.name
+        shutil.copy2(tagged, wheel)
         manifest.update(
             status="built",
             wheel=str(wheel.relative_to(work)),
             wheel_sha256=digest(wheel),
             wheel_bytes=wheel.stat().st_size,
+            wheel_platform_tag=f"macosx_13_0_{platform.machine()}",
+            compiler_wheel=compiler_wheel,
             verification=verification,
             notices=collect_notices(source, work),
             elapsed_seconds=round(time.perf_counter() - started, 3),
