@@ -72,6 +72,7 @@
     {
       "name": "opus",
       "filename": "opus-1.6.tar.gz",
+      "download_timeout": 180,
       "sha256": "b7637334527201fdfd6dd6a02e67aceffb0e5e60155bbd89175647a80301c92c",
       "urls": [
         "https://ftp.osuosl.org/pub/xiph/releases/opus/opus-1.6.tar.gz"

@@ -59,7 +59,48 @@ jobs:
       - run: uv run --no-sync ruff format --check .
       - run: uv run --no-sync pytest -q --junitxml=artifacts/tests.xml
       - run: uv run --no-sync python tools/generate_fixtures.py
+      - name: Identify the Windows native cache environment
+        id: windows-native-environment
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if ($env:ImageVersion) {
+            "image=$env:ImageVersion" >> $env:GITHUB_OUTPUT
+          }
+      - name: Restore Windows OpenCV build intermediates
+        id: windows-native-cache
+        if: runner.os == 'Windows' && steps.windows-native-environment.outputs.image != ''
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            build/windows-opencv
+            build/windows-inputs
+            build/opencv-image-only/source
+          key: windows-opencv-v1-${{ runner.arch }}-${{ steps.windows-native-environment.outputs.image }}-${{ hashFiles('uv.lock', 'pyproject.toml', 'tools/build_windows_opencv.py', 'tools/windows_native_host.py', 'tools/build_windows_portable.py', 'tools/windows_pe.py') }}
       - run: uv run --no-sync python tools/build_desktop.py
+      - name: Check that the Windows native build passed its audits
+        id: windows-native-ready
+        if: always() && runner.os == 'Windows' && steps.windows-native-environment.outputs.image != ''
+        shell: pwsh
+        run: |
+          $nativeManifestPath = 'build/windows-opencv/manifest.json'
+          if (Test-Path $nativeManifestPath) {
+            $nativeManifest = Get-Content -Raw $nativeManifestPath | ConvertFrom-Json
+            if ($nativeManifest.status -eq 'built') {
+              'ready=true' >> $env:GITHUB_OUTPUT
+            }
+          }
+      - name: Save audited Windows OpenCV build intermediates
+        if: always() && steps.windows-native-ready.outputs.ready == 'true' && steps.windows-native-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            build/windows-opencv
+            build/windows-inputs
+            build/opencv-image-only/source
+          key: ${{ steps.windows-native-cache.outputs.cache-primary-key }}
       - name: Install and check the actual macOS archive
         if: runner.os == 'macOS'
         shell: bash

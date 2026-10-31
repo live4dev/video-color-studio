@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import shutil
 import subprocess
 import tarfile
 from pathlib import Path
@@ -111,6 +112,72 @@ def test_notice_reader_rejects_symlinks_and_never_extracts_member_paths(tmp_path
     assert saved.read_bytes() == b"permissive license"
     assert saved.parent == tmp_path / "notices"
     assert not (tmp_path / "runtime.py").exists()
+
+
+def msys_fixture(tmp_path: Path) -> tuple[Path, bytes]:
+    zstd = shutil.which("zstd")
+    if zstd is None:
+        pytest.skip("developer source collection requires zstd")
+    nested = io.BytesIO()
+    with tarfile.open(fileobj=nested, mode="w:gz") as source:
+        data = b"upstream source license"
+        member = tarfile.TarInfo("src/LICENSE")
+        member.size = len(data)
+        source.addfile(member, io.BytesIO(data))
+    outer = io.BytesIO()
+    with tarfile.open(fileobj=outer, mode="w") as source:
+        for name, data in [
+            ("../../nested.tar.gz", nested.getvalue()),
+            ("project/PKGBUILD", b"verified build recipe"),
+            ("project/.SRCINFO", b"verified source metadata"),
+        ]:
+            member = tarfile.TarInfo(name)
+            member.size = len(data)
+            source.addfile(member, io.BytesIO(data))
+        symlink = tarfile.TarInfo("ignored/PKGBUILD")
+        symlink.type = tarfile.SYMTYPE
+        symlink.linkname = "/untrusted/outside"
+        source.addfile(symlink)
+    # A consumer may stop at tar EOF before zstd has finished its full frame.
+    payload = outer.getvalue() + bytes(range(256)) * 8192
+    compressed = subprocess.run(
+        [zstd, "--quiet", "--stdout"], input=payload, capture_output=True, check=True
+    ).stdout
+    archive = tmp_path / "source.src.tar.zst"
+    archive.write_bytes(compressed)
+    return archive, compressed
+
+
+def test_msys_notice_reader_finishes_zstd_and_retains_regular_nested_sources(tmp_path):
+    archive, _ = msys_fixture(tmp_path)
+    output = tmp_path / "notices"
+    notices = collector.extract_msys_notices(archive, output)
+    assert {row["member"] for row in notices} == {
+        "../../nested.tar.gz!/src/LICENSE",
+        "project/PKGBUILD",
+        "project/.SRCINFO",
+    }
+    assert (output / "PKGBUILD").read_bytes() == b"verified build recipe"
+    assert (output / ".SRCINFO").read_bytes() == b"verified source metadata"
+    for row in notices:
+        assert (output / row["path"]).parent == output
+        assert collector.sha256(output / row["path"]) == row["sha256"]
+    assert set(tmp_path.iterdir()) == {archive, output}
+
+
+def test_msys_notice_reader_rejects_corrupt_data_after_valid_tar_eof(tmp_path):
+    archive, compressed = msys_fixture(tmp_path)
+    archive.write_bytes(compressed + b"corrupt trailing compressed frame")
+    output = tmp_path / "notices"
+    with pytest.raises(subprocess.CalledProcessError):
+        collector.extract_msys_notices(archive, output)
+    assert not list(output.iterdir())
+
+
+def test_msys_notice_reader_requires_explicit_developer_zstd_tool(tmp_path, monkeypatch):
+    monkeypatch.setattr(collector.shutil, "which", lambda name: None)
+    with pytest.raises(RuntimeError, match="zstd is required"):
+        collector.extract_msys_notices(tmp_path / "source.src.tar.zst", tmp_path / "notices")
 
 
 def test_qt_bundle_unknown_module_blocks_incomplete_source_claim(tmp_path):

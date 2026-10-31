@@ -218,6 +218,8 @@ uv run --no-sync python tools/smoke_bundle.py
 ```
 
 На целевой ОС доступны `packaging/macos/build.sh` и `packaging/windows/build.ps1`.
+Для сбора соответствующих исходников MSYS в developer-окружении нужна утилита
+`zstd` в PATH; готовому приложению она не требуется.
 Для первой macOS-сборки используйте `packaging/macos/build.sh`: он собирает и
 устанавливает CPU ONNX Runtime с целевым macOS 13.0 до упаковки приложения.
 Прямой запуск `build_desktop.py` требует уже установленного проверенного runtime;
