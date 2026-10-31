@@ -1,11 +1,11 @@
 """Conservative, non-geometric person/skin/water masks and serializable manual edits.
 
-The optional PPHumanSeg model is bundled at build time and runs on OpenCV's CPU backend.
-No model, data or network client is downloaded/started by this module.
+PPHumanSeg locates people; SelfieMulticlass separately identifies visible skin and
+excludes hair/clothes/accessories. Both models are bundled and run locally on CPU.
 """
 
 import hashlib
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from math import isfinite
 from pathlib import Path
 from threading import Lock
@@ -15,6 +15,7 @@ import numpy as np
 
 from .analyze import validate_rgb
 from .errors import StudioError
+from .skin import SKIN_MODEL_ID, SkinPrediction, infer_skin
 
 MODEL_NAME = "human_segmentation_pphumanseg_2023mar.onnx"
 MODEL_SHA256 = "552d8a984054e59b5d773d24b9b12022b22046ceb2bbc4c9aaeaceb36a9ddf24"
@@ -137,12 +138,21 @@ class MaskSet:
     person_confidence: float
     warnings: tuple[str, ...] = ()
     method: str = "manual-only"
+    skin_source: str = "none"
+    skin_status: str = "needs-review"
+    skin_model_sha256: str | None = None
+    skin_diagnostics: dict = field(default_factory=dict)
+    skin_exclusion: np.ndarray | None = None
 
     def to_metadata(self) -> dict:
         return {
             "method": self.method,
             "skin_confidence": self.skin_confidence,
             "person_confidence": self.person_confidence,
+            "skin_source": self.skin_source,
+            "skin_status": self.skin_status,
+            "skin_model_sha256": self.skin_model_sha256,
+            "skin_diagnostics": self.skin_diagnostics.copy(),
             "warnings": list(self.warnings),
             "coverage": {
                 key: float(np.mean(getattr(self, key)))
@@ -321,6 +331,7 @@ def build_masks(
     *,
     feather: float = 0.006,
     use_model: bool = True,
+    skin_prediction: SkinPrediction | None = None,
 ) -> MaskSet:
     validate_rgb(rgb)
     edits = edits or MaskEdits()
@@ -365,46 +376,88 @@ def build_masks(
         person = _feather(box, guidance, feather)
         person_confidence = 0.9
         method = "manual-person-region"
+    base_person = person.copy()
     person = _apply_strokes(person, edits, "person", guidance, feather)
     if any(stroke.target == "person" and stroke.operation == "add" for stroke in edits.strokes):
         person_confidence = max(person_confidence, 0.9)
-    if person_confidence < 0.8 and not warnings:
-        warnings.append(
-            "Нет уверенной маски человека. Укажите область человека или добавьте кожу кистью."
-        )
-    r, g, b = np.moveaxis(rgb, -1, 0)
-    maximum, minimum = rgb.max(axis=2), rgb.min(axis=2)
-    saturation = (maximum - minimum) / np.maximum(maximum, 1e-5)
-    # This is a skin-color candidate *inside* a semantic/manual person region, not a skin model.
-    # It deliberately abstains on severe cyan casts and very saturated clothing.
-    candidate = (
-        (r > g * 0.87)
-        & (r > b * 0.8)
-        & (r - np.maximum(g, b) > np.maximum(0.012, maximum * 0.035))
-        & (g > b * 0.65)
-        & (g < r * 1.17)
-        & (saturation < 0.66)
-        & (saturation > 0.08)
-        & (maximum > 0.075)
-        & (minimum > 0.025)
-        & (guidance < 0.96)
-    ).astype(np.float32)
     skin = np.zeros(shape, np.float32)
     skin_confidence = 0.0
-    accepted = candidate * (person > 0.7)
-    radius = max(1, min(6, round(min(shape) * 0.002)))
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (radius * 2 + 1, radius * 2 + 1))
-    accepted = cv2.morphologyEx(accepted, cv2.MORPH_OPEN, kernel)
-    if person_confidence >= 0.8 and np.count_nonzero(accepted) >= max(
-        8, rgb.shape[0] * rgb.shape[1] * 0.00005
-    ):
-        skin_confidence = min(0.9, person_confidence)
-        skin = _feather(accepted, guidance, feather) * person * candidate * skin_confidence
-    elif person_confidence >= 0.8:
-        warnings.append(
-            "Цвет кожи не определён уверенно. Для локальной коррекции добавьте маску кистью."
+    skin_source, skin_status = "none", "needs-review"
+    skin_model_sha256, skin_diagnostics = None, {}
+    exclusion = np.zeros(shape, np.float32)
+    if skin_prediction is None and use_model:
+        try:
+            skin_prediction = infer_skin(rgb, person)
+        except (StudioError, cv2.error) as exc:
+            warnings.append(str(exc))
+    if skin_prediction is not None:
+        if not isinstance(skin_prediction, SkinPrediction):
+            raise StudioError("Некорректный результат семантической модели кожи.")
+        skin_prediction.validate(shape)
+        skin_source = SKIN_MODEL_ID
+        skin_model_sha256 = skin_prediction.model_sha256
+        skin_diagnostics = skin_prediction.diagnostics.copy()
+        exclusion = skin_prediction.exclusion.astype(np.float32)
+        probability = skin_prediction.skin.astype(np.float32)
+        # The skin model may find a hand/leg missed by the coarse silhouette. Its own
+        # foreground protects that region from water grading; a silhouette is not skin.
+        semantic_person = skin_prediction.person.astype(np.float32)
+        if edits.person_box is not None:
+            semantic_person = semantic_person * base_person
+        person = _apply_strokes(
+            np.maximum(base_person, np.clip((semantic_person - 0.35) / 0.5, 0, 1)),
+            edits,
+            "person",
+            guidance,
+            feather,
         )
+        semantic_certain = semantic_person > 0.8
+        if semantic_certain.any():
+            person_confidence = max(
+                person_confidence, float(np.median(semantic_person[semantic_certain]))
+            )
+        accepted = (probability >= 0.65) & (probability - exclusion >= 0.55)
+        accepted &= semantic_person >= 0.7
+        accepted &= person >= 0.5
+        selected = probability[accepted]
+        ambiguous = (probability >= 0.5) & (semantic_person >= 0.7) & (person >= 0.5) & ~accepted
+        skin_confidence = float(np.median(selected)) if selected.size else 0.0
+        skin_diagnostics.update(
+            selected_pixels=int(selected.size),
+            selected_fraction=float(selected.size / probability.size),
+            ambiguous_pixels=int(np.count_nonzero(ambiguous)),
+            semantic_score=skin_confidence,
+            minimum_semantic_margin=0.55,
+            automatic_accepted=False,
+        )
+        if (
+            skin_confidence >= 0.8
+            and max(8, probability.size * 0.00005) <= selected.size < probability.size * 0.85
+        ):
+            alpha = np.clip((probability - 0.45) / 0.4, 0, 1) * accepted
+            skin = _feather(alpha.astype(np.float32), guidance, feather * 0.5)
+            # Hard exclusions after edge filtering prevent warm hair/equipment leakage.
+            skin *= accepted & (exclusion < 0.5)
+            skin_status = "automatic"
+            skin_diagnostics["automatic_accepted"] = True
+            warnings = [
+                message
+                for message in warnings
+                if not message.startswith("Человек не выделен уверенно")
+            ]
+            if np.count_nonzero(ambiguous) > max(16, selected.size * 0.2):
+                warnings.append(
+                    "Неоднозначные участки кожи исключены из автокоррекции. Проверьте маску."
+                )
+    if skin_status != "automatic":
+        warnings.append(
+            "Маска кожи требует проверки: автоматическая коррекция отключена. Добавьте кожу кистью."
+        )
+    elif skin_source == SKIN_MODEL_ID:
+        method += "+selfie-multiclass-v1"
     skin = _apply_strokes(skin, edits, "skin", guidance, feather)
+    if any(stroke.target == "skin" for stroke in edits.strokes):
+        skin_source, skin_status = "manual", "manual"
     if any(stroke.target == "skin" and stroke.operation == "add" for stroke in edits.strokes):
         skin_confidence = 1.0
         # Explicitly marked skin is also known to belong to the person. It does not create
@@ -415,11 +468,18 @@ def build_masks(
             message
             for message in warnings
             if not message.startswith(
-                ("Нет уверенной маски человека", "Цвет кожи не определён", "Человек не выделен")
+                (
+                    "Нет уверенной маски человека",
+                    "Цвет кожи не определён",
+                    "Человек не выделен",
+                    "Маска кожи требует проверки",
+                )
             )
         ]
         method += "+manual-skin"
     # Water hue heuristic is allowed only outside the person, and below a manual waterline.
+    r, g, b = np.moveaxis(rgb, -1, 0)
+    maximum = rgb.max(axis=2)
     water_color = ((g > r * 1.08) & (b > r * 1.08) & (maximum > 0.05)).astype(np.float32)
     water = _feather(water_color, guidance, feather) * (1 - person) * underwater * (1 - skin)
     water = _apply_strokes(water, edits, "water", guidance, feather) * underwater * (1 - skin)
@@ -432,4 +492,9 @@ def build_masks(
         person_confidence,
         tuple(dict.fromkeys(warnings)),
         method,
+        skin_source=skin_source,
+        skin_status=skin_status,
+        skin_model_sha256=skin_model_sha256,
+        skin_diagnostics=skin_diagnostics,
+        skin_exclusion=exclusion,
     )

@@ -1,6 +1,6 @@
 """Localized grading blends color-only edits into the original scene geometry."""
 
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, fields, replace
 from math import isfinite
 
 import cv2
@@ -100,16 +100,7 @@ def apply_local_grade(
         # Skin controls belong to the underwater grade. This also scopes explicit skin
         # brush additions and reference statistics; above-water skin changes only through
         # the separately requested above_exposure, never an underwater warmth adjustment.
-        masks = MaskSet(
-            masks.person,
-            masks.skin * masks.underwater,
-            masks.water,
-            masks.underwater,
-            masks.skin_confidence,
-            masks.person_confidence,
-            masks.warnings,
-            masks.method,
-        )
+        masks = replace(masks, skin=masks.skin * masks.underwater)
     if not settings.enabled:
         return LocalResult(globally_graded_rgb.copy(), masks, masks.warnings)
     # Only the underwater side receives the underwater global grade. Above water gets its

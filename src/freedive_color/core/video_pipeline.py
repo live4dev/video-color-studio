@@ -28,7 +28,7 @@ from .media_io import signature
 from .presets import GradeSettings
 from .project import json_bytes, sha256_file
 from .reference import PaletteReference
-from .temporal import ShotPlan, TemporalAnalyzer, TemporalMaskTracker
+from .temporal import ShotPlan, TemporalAnalyzer, TemporalMaskTracker, _resize_masks
 
 VIDEO_EXTENSIONS = {".mp4", ".mov"}
 MAX_VIDEO_PIXELS = 4096 * 2304
@@ -573,6 +573,40 @@ def _frame_iterator(container, stream, info, start, end):
         yield frame
 
 
+def _warm_temporal_masks(source, info, plan, tracker, end, token, progress):
+    """Replay only the current shot's prefix so seeking has full-export mask history.
+
+    Frames before ``end`` update proxy alphas only: they are never encoded or muxed.
+    Decode at source resolution exactly as the export loop does; preview resizing must
+    not alter the semantic model's input or the optical-flow trajectory.
+    """
+    shot_id = plan.shot_at(float(end))
+    start = (
+        _tick(Fraction(str(plan.cuts[shot_id - 1])), info.time_base) * info.time_base
+        if shot_id
+        else info.video_start
+    )
+    if end <= start:
+        return 0, start
+    progress(20, "Подготовка видеомасок к выбранному кадру…")
+    count = 0
+    token.check()
+    with open_local_media(source) as container:
+        stream = container.streams[info.video_stream_index]
+        for frame in _frame_iterator(container, stream, info, start, end):
+            token.check()
+            timestamp = _timestamp(frame, info.time_base)
+            tracker.update(
+                decode_video_frame(frame, info),
+                float(timestamp),
+                shot_id=plan.shot_at(float(timestamp)),
+            )
+            count += 1
+            if count % 6 == 0:
+                progress(20, f"Подготовка видеомасок: {count} кадров")
+    return count, start
+
+
 def _audio_iterator(container, streams, start, end):
     if not streams:
         return
@@ -871,6 +905,11 @@ def export_video(
                 raise StudioError("В выбранном диапазоне нет видеокадров.")
             actual_start = _timestamp(frame, info.time_base)
             shift = actual_start if is_preview else Fraction(0)
+            warmup_frames, mask_history_start = 0, actual_start
+            if tracker and is_preview and actual_start > info.video_start:
+                warmup_frames, mask_history_start = _warm_temporal_masks(
+                    source, info, plan, tracker, actual_start, token, progress
+                )
             audio_packets = _audio_iterator(
                 audio_input,
                 list(audio_input.streams.audio),
@@ -936,14 +975,16 @@ def export_video(
                     if frame is not None and (audio_packet is None or video_time <= audio_time):
                         following_frame = next(frames, None)
                         rgb = decode_video_frame(frame, info)
-                        if scale < 1:
-                            rgb = cv2.resize(rgb, (width, height), interpolation=cv2.INTER_AREA)
                         shot_id = plan.shot_at(float(video_time))
                         masks = (
                             tracker.update(rgb, float(video_time), shot_id=shot_id)
                             if tracker
                             else None
                         )
+                        if scale < 1:
+                            rgb = cv2.resize(rgb, (width, height), interpolation=cv2.INTER_AREA)
+                            if masks is not None:
+                                masks = _resize_masks(masks, (width, height))
                         if masks:
                             warnings.extend(
                                 message for message in masks.warnings if message not in warnings
@@ -1057,6 +1098,8 @@ def export_video(
                 "actual_source_start": _rational(actual_start),
                 "common_pts_shift": _rational(shift),
                 "audio_cut": "Original packets, common shift, no audio re-encoding",
+                "mask_warmup_frames": warmup_frames,
+                "mask_history_source_start": _rational(mask_history_start),
             },
             "temporal_masks": tracker.to_metadata() if tracker else None,
             "backend": backend_versions(),

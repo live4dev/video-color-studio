@@ -16,10 +16,11 @@ from freedive_color.core.masks import (
     build_masks,
 )
 from freedive_color.core.media_io import load_photo
+from freedive_color.core.skin import SKIN_MODEL_ID, SkinPrediction
 
 
 @pytest.fixture
-def scene():
+def scene(monkeypatch):
     rgb = np.full((160, 240, 3), [0.08, 0.4, 0.65], np.float32)
     person = np.zeros(rgb.shape[:2], np.float32)
     person[20:152, 60:185] = 0.99
@@ -28,6 +29,15 @@ def scene():
     rgb[30:65, 135:170] = [0.85, 0.08, 0.55]  # saturated swimsuit
     rgb[100:130, 140:172] = [0.02, 0.02, 0.02]  # black mask
     rgb[125:150, 80:120] = [0.03, 0.12, 0.38]  # blue fin
+    # Explicit semantic oracle: these tests validate mask/grade composition, not model
+    # accuracy on featureless RGB swatches. Real inference has its own fixture test.
+    skin = np.zeros(person.shape, np.float32)
+    skin[40:70, 90:120] = skin[80:110, 90:120] = 0.95
+    exclusion = (person > 0).astype(np.float32) * (skin == 0) * 0.99
+    monkeypatch.setattr(
+        "freedive_color.core.masks.infer_skin",
+        lambda _rgb, _hint: SkinPrediction(skin, person, exclusion, "test-model"),
+    )
     return rgb, person
 
 
@@ -233,13 +243,15 @@ def test_real_photo_semantic_masks_are_local_and_do_not_select_black_gear():
     source = Path(__file__).parents[1] / "fixtures" / "freediver_moalboal.jpg"
     photo = load_photo(source, max_edge=750)
     masks = build_masks(photo.rgb)
-    assert masks.method == "pphumanseg-opencv-cpu"
+    assert masks.method.startswith("pphumanseg-opencv-cpu")
+    assert masks.skin_source == SKIN_MODEL_ID
+    assert masks.skin_model_sha256
     assert masks.person.shape == photo.rgb.shape[:2]
     assert 0.005 < masks.person.mean() < 0.5
     assert masks.skin.mean() < masks.person.mean()
     # Black gear cannot enter automatic skin correction, including edge-feathered alpha.
     assert masks.skin[photo.rgb.max(axis=2) < 0.07].max(initial=0) == 0
-    assert masks.skin[(photo.rgb[..., 2] > photo.rgb[..., 0] * 2)].max(initial=0) == 0
+    # Blue pixels are no longer banned: visible underwater skin can be cyan/blue.
     # The blue right arm is part of the person even though it has a water-like hue.
     # This avoids changing the wetsuit with the water hue control.
     y, x = round(0.64 * photo.rgb.shape[0]), round(0.46 * photo.rgb.shape[1])

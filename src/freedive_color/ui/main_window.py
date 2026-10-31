@@ -1013,10 +1013,13 @@ class MainWindow(ControllerWindowMixin, QMainWindow):
             getattr(masks, target, None) if target != "none" else None, target
         )
         if masks:
+            status = {
+                "automatic": _("автоматическая"),
+                "needs-review": _("требует проверки"),
+                "manual": _("ручная"),
+            }.get(masks.skin_status, _("требует проверки"))
             self.local_controls.confidence_label.setText(
-                _("Уверенность маски кожи: ")
-                + f"{masks.skin_confidence:.0%}\n"
-                + "\n".join(masks.warnings)
+                _("Маска кожи: ") + status + "\n" + "\n".join(masks.warnings)
             )
 
     def apply_to_selected(self) -> None:
