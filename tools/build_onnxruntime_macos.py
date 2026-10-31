@@ -34,6 +34,7 @@ IDENTITY_MODEL_HEX = (
 )
 CMAKE_DEFINES = (
     "CMAKE_OSX_DEPLOYMENT_TARGET=13.0",
+    "FETCHCONTENT_TRY_FIND_PACKAGE_MODE=NEVER",
     "onnxruntime_BUILD_UNIT_TESTS=OFF",
     "onnxruntime_USE_TELEMETRY=OFF",
     "onnxruntime_USE_COREML=OFF",
@@ -204,9 +205,18 @@ def prepare_source(work: Path) -> tuple[Path, str]:
         ["git", "fetch", "--depth=1", "--filter=blob:none", "--no-tags", "origin", SOURCE_COMMIT],
         ["git", "checkout", "--detach", "FETCH_HEAD"],
     ]
+    environment = os.environ.copy()
+    environment["GIT_LFS_SKIP_SMUDGE"] = "1"
     with (work / "source.log").open("w", encoding="utf-8") as log:
         for command in commands:
-            subprocess.run(command, cwd=source, check=True, stdout=log, stderr=subprocess.STDOUT)
+            subprocess.run(
+                command,
+                cwd=source,
+                env=environment,
+                check=True,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+            )
     commit = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=source, check=True, capture_output=True, text=True
     ).stdout.strip()
