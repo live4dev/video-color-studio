@@ -327,6 +327,11 @@ Freedive Color Studio                         Импорт   Экспорт
   ([zstd](https://github.com/facebook/zstd/issues/4563),
   [libarchive](https://github.com/libarchive/libarchive/issues/1118)). Ошибки
   декомпрессии, включая данные после tar EOF, не игнорируются.
+- Git `-text` закрепляет исходные байты SHA-проверяемых notices и upstream
+  recipe/patch в `packaging/media`; бинарные ONNX сохраняют прежний `binary`.
+  Отдельный checkout с `core.autocrlf=true` воспроизводит изменение SHA без этих
+  правил и проверяет все notices из locks и патчи с ними. Сборщик сохраняет
+  `.gitattributes` в архиве исходников; сами проверки SHA не нормализуют переводы строк.
 - Windows CI сохраняет промежуточные файлы OpenCV после успешного native-аудита,
   даже если последующая упаковка остановилась. Ключ включает образ runner,
   архитектуру, lock зависимостей и исходники конфигурации/toolchain; общих fallback

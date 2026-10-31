@@ -180,6 +180,68 @@ def test_msys_notice_reader_requires_explicit_developer_zstd_tool(tmp_path, monk
         collector.extract_msys_notices(tmp_path / "source.src.tar.zst", tmp_path / "notices")
 
 
+@pytest.mark.parametrize("preserve_upstream_bytes", [False, True])
+def test_autocrlf_checkout_preserves_all_pinned_notice_bytes(tmp_path, preserve_upstream_bytes):
+    git = shutil.which("git")
+    if git is None:
+        pytest.skip("checkout regression requires git")
+    source, checkout = tmp_path / "source", tmp_path / "checkout"
+    source.mkdir()
+    expected = {}
+    for lock in collector.RECORDS.glob("*.json"):
+        record = json.loads(lock.read_text(encoding="utf-8"))
+        if not isinstance(record, dict):
+            continue
+        for notice in record.get("extra_notices", []):
+            expected[notice["path"]] = notice["sha256"]
+    assert expected
+    for relative in ("upstream-build-ffmpeg.py.txt", "upstream-ffmpeg.patch"):
+        path = collector.RECORDS / relative
+        expected[path.relative_to(collector.ROOT).as_posix()] = collector.sha256(path)
+    for relative, digest in expected.items():
+        original = collector.ROOT / relative
+        assert collector.sha256(original) == digest
+        target = source / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(original.read_bytes())
+    attributes = (collector.ROOT / ".gitattributes").read_bytes()
+    (source / ".gitattributes").write_bytes(
+        attributes if preserve_upstream_bytes else b"*.onnx binary\n"
+    )
+    binary = source / "fixture.onnx"
+    binary.write_bytes(b"binary model fixture\n\x00\xff\n")
+    expected[binary.name] = collector.sha256(binary)
+    command = [git, "-c", f"core.hooksPath={tmp_path / 'no-hooks'}"]
+    options = {"check": True, "capture_output": True}
+    subprocess.run([*command, "init", str(source)], **options)
+    subprocess.run([*command, "-c", "core.autocrlf=false", "add", "."], cwd=source, **options)
+    subprocess.run(
+        [
+            *command,
+            "-c",
+            "user.name=Packaging test",
+            "-c",
+            "user.email=packaging-test@example.invalid",
+            "commit",
+            "-m",
+            "Source checkout fixture",
+        ],
+        cwd=source,
+        **options,
+    )
+    subprocess.run(
+        [*command, "-c", "core.autocrlf=true", "clone", str(source), str(checkout)], **options
+    )
+    mismatches = [
+        path for path, digest in expected.items() if collector.sha256(checkout / path) != digest
+    ]
+    if preserve_upstream_bytes:
+        assert mismatches == []
+    else:
+        assert sorted(mismatches) == sorted(path for path in expected if path != binary.name)
+    assert collector.sha256(checkout / binary.name) == expected[binary.name]
+
+
 def test_qt_bundle_unknown_module_blocks_incomplete_source_claim(tmp_path):
     (tmp_path / "QtCore.framework").mkdir()
     (tmp_path / "QtWebEngineCore.framework").mkdir()

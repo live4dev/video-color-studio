@@ -47,6 +47,7 @@ QTBASE = {
 QT_MODULES = {**dict.fromkeys(QTBASE, "qtbase"), "QtSvg": "qtsvg", "QtSvgWidgets": "qtsvg"}
 PROJECT_DIRS = ("src", "tools", "packaging", "docs", "tests", ".github")
 PROJECT_FILES = (
+    ".gitattributes",
     "pyproject.toml",
     "uv.lock",
     "LICENSE",
@@ -557,7 +558,7 @@ def collect(
     for notice in lock.get("extra_notices", []):
         source = ROOT / notice["path"]
         if sha256(source) != notice["sha256"]:
-            raise RuntimeError("Explicit native notice checksum mismatch")
+            raise RuntimeError(f"Explicit native notice checksum mismatch: {notice['path']}")
         target = work / "notices/explicit" / source.name
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, target)

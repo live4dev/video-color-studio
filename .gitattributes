@@ -1,1 +1,7 @@
 *.onnx binary
+
+# Preserve upstream notice/recipe/patch bytes used by source checksum records.
+packaging/media/WINPTHREAD-COPYING.txt -text
+packaging/media/runtime-notices/** -text
+packaging/media/upstream-build-ffmpeg.py.txt -text
+packaging/media/upstream-ffmpeg.patch -text
