@@ -1,3 +1,4 @@
+import json
 from dataclasses import replace
 
 import cv2
@@ -390,6 +391,8 @@ def test_flow_failure_discards_history_until_a_new_semantic_observation(monkeypa
     assert result.skin.max() == 0
     assert result.skin_status == "needs-review"
     assert tracker.to_metadata()["skin_status"] == "needs-review"
+    assert tracker.to_metadata()["skin_diagnostics"]["automatic_accepted"] is False
+    assert tracker.to_metadata()["skin_diagnostics"]["accepted_components"] == 0
     monkeypatch.setattr(
         cv2,
         "calcOpticalFlowFarneback",
@@ -412,3 +415,148 @@ def test_default_refresh_uses_half_second_in_source_pts():
     assert metadata["skin_source"] == "selfie-multiclass-v1"
     assert metadata["skin_model_sha256"] == "a" * 64
     assert sum(metadata["skin_status_frames"].values()) == 6
+
+
+def partial_patch(rgb):
+    masks = semantic_patch(rgb)
+    return replace(
+        masks,
+        skin_status="needs-review",
+        skin_diagnostics={
+            "automatic_accepted": True,
+            "accepted_components": 1,
+            "rejected_components": 1,
+            "ambiguous_pixels": 20,
+        },
+    )
+
+
+def test_trusted_partial_mask_remains_usable_after_refresh_and_flow(monkeypatch):
+    monkeypatch.setattr(
+        cv2,
+        "calcOpticalFlowFarneback",
+        lambda current, *_args: np.zeros((*current.shape, 2), np.float32),
+    )
+    rgb = textured_subject()
+    masks = partial_patch(rgb)
+    tracker = TemporalMaskTracker(use_model=False, proxy_edge=192)
+    for index in range(3):
+        result = tracker.update(rgb, index / 30, fresh_masks=masks if index == 0 else None)
+        assert result.skin[42, 42] > 0.9
+        assert result.skin_status == "needs-review"
+        assert result.skin_diagnostics["accepted_components"] == 1
+    assert tracker.to_metadata()["partial_skin_frames"] == 3
+
+
+def test_fresh_partial_rejection_clears_only_the_rejected_old_component(monkeypatch):
+    monkeypatch.setattr(
+        cv2,
+        "calcOpticalFlowFarneback",
+        lambda current, *_args: np.zeros((*current.shape, 2), np.float32),
+    )
+    rgb = textured_subject()
+    masks = semantic_patch(rgb)
+    masks.skin[30:55, 90:115] = 0.95
+    tracker = TemporalMaskTracker(use_model=False, proxy_edge=192)
+    tracker.update(rgb, 0, fresh_masks=masks)
+    fresh = partial_patch(rgb)
+    result = tracker.update(rgb, 1 / 30, fresh_masks=fresh)
+    assert result.skin[42, 42] > 0.9
+    assert result.skin[42, 102] == 0
+    again = tracker.update(rgb, 2 / 30)
+    assert again.skin[42, 42] > 0.9
+    assert again.skin[42, 102] == 0
+
+
+def test_occlusion_of_one_skin_component_keeps_an_unrelated_limb(monkeypatch):
+    monkeypatch.setattr(
+        cv2,
+        "calcOpticalFlowFarneback",
+        lambda current, *_args: np.zeros((*current.shape, 2), np.float32),
+    )
+    rgb = blue((96, 160))
+    rgb[30:55, 30:55] = [0.2, 0.45, 0.4]
+    rgb[30:55, 90:115] = [0.2, 0.45, 0.4]
+    masks = semantic_patch(rgb)
+    masks.skin[30:55, 90:115] = 0.95
+    tracker = TemporalMaskTracker(use_model=False, proxy_edge=192)
+    tracker.update(rgb, 0, fresh_masks=masks)
+    occluded = rgb.copy()
+    occluded[30:55, 30:55] = 0.02
+    result = tracker.update(occluded, 1 / 30)
+    assert result.skin[42, 42] == 0
+    assert result.skin[42, 102] > 0.9
+    assert result.skin_status == "needs-review"
+    assert result.skin_diagnostics["automatic_accepted"] is True
+    assert result.skin_diagnostics["accepted_components"] == 1
+    assert tracker.skin_component_rejections == 1
+    assert tracker.flow_failures == 0
+    again = tracker.update(occluded, 2 / 30)
+    assert again.skin[42, 42] == 0
+    assert again.skin[42, 102] > 0.9
+
+
+def test_occlusion_during_sixty_fps_fade_in_cannot_resurrect_semantic_target(monkeypatch):
+    monkeypatch.setattr(
+        cv2,
+        "calcOpticalFlowFarneback",
+        lambda current, *_args: np.zeros((*current.shape, 2), np.float32),
+    )
+    rgb = blue((96, 160))
+    rgb[30:55, 30:55] = [0.2, 0.45, 0.4]
+    rgb[30:55, 90:115] = [0.2, 0.45, 0.4]
+    old = semantic_patch(rgb)
+    fresh_skin = old.skin.copy()
+    fresh_skin[30:55, 90:115] = 0.95
+    tracker = TemporalMaskTracker(use_model=False, proxy_edge=192)
+    tracker.update(rgb, 0, fresh_masks=old)
+    fading = tracker.update(rgb, 1 / 60, fresh_masks=replace(old, skin=fresh_skin))
+    assert 0 < fading.skin[42, 102] < 0.1
+    assert tracker._target.skin[42, 102] > 0.9
+    covered = rgb.copy()
+    covered[30:55, 90:115] = 0.02
+    for index in (2, 3, 4):
+        result = tracker.update(covered, index / 60)
+        assert result.skin[42, 102] == 0
+        assert tracker._target.skin[42, 102] == 0
+        assert result.skin[42, 42] > 0.9
+    assert tracker.skin_rejections == 1
+    assert tracker.skin_component_rejections == 1
+    assert tracker.flow_failures == 0
+
+
+def test_partial_mask_manual_override_runs_after_exclusions():
+    rgb = blue((96, 160))
+    masks = partial_patch(rgb)
+    masks.skin_exclusion[38:47, 38:47] = 1
+    edits = MaskEdits(strokes=(BrushStroke("skin", "add", ((0.2625, 0.4375),), 0.08),))
+    tracker = TemporalMaskTracker(edits=edits, use_model=False, proxy_edge=192)
+    result = tracker.update(rgb, 0, fresh_masks=masks)
+    assert result.skin[42, 42] > 0.9
+    assert result.skin_status == "manual"
+
+
+def test_partial_tracking_reports_scalar_algorithm_and_model_provenance(monkeypatch):
+    monkeypatch.setattr(
+        cv2,
+        "calcOpticalFlowFarneback",
+        lambda current, *_args: np.zeros((*current.shape, 2), np.float32),
+    )
+    rgb = textured_subject()
+    models = ({"model_id": "test-semantic-model", "sha256": "a" * 64},)
+    masks = replace(
+        partial_patch(rgb),
+        skin_algorithm_version="semantic-consensus-v2",
+        skin_models=models,
+    )
+    tracker = TemporalMaskTracker(use_model=False, proxy_edge=192)
+    tracker.update(rgb, 100, fresh_masks=masks)
+    result = tracker.update(rgb, 100.1)
+    assert result.skin_algorithm_version == "semantic-consensus-v2"
+    assert result.skin_models == models
+    metadata = json.loads(json.dumps(tracker.to_metadata(), allow_nan=False))
+    assert metadata["skin_algorithm_version"] == "semantic-consensus-v2"
+    assert metadata["skin_models"] == list(models)
+    assert metadata["skin_diagnostics"]["accepted_components"] == 1
+    assert metadata["partial_skin_frames"] == 2
+    assert "skin" not in metadata and "person" not in metadata

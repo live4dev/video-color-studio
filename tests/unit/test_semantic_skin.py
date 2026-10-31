@@ -7,10 +7,14 @@ import pytest
 from freedive_color.core.errors import StudioError
 from freedive_color.core.masks import BrushStroke, MaskEdits, build_masks
 from freedive_color.core.skin import (
+    SKIN_CLASS_NAMES,
     SKIN_MODEL_ID,
+    RawPredictionCache,
     SelfieSkinSegmenter,
     SkinPrediction,
+    SkinView,
     _regions,
+    fuse_skin_views,
 )
 
 
@@ -79,7 +83,10 @@ def test_ambiguous_accessory_boundary_is_excluded_without_losing_clear_skin():
     masks = build_masks(rgb, person_probability=person, skin_prediction=prediction)
     assert masks.skin[35, 40] == 0
     assert masks.skin[35, 80] > 0.9
-    assert masks.skin_status == "automatic"
+    assert masks.skin_status == "needs-review"
+    assert masks.skin_diagnostics["automatic_accepted"]
+    assert masks.skin_diagnostics["accepted_components"] == 2
+    assert masks.skin_diagnostics["rejected_components"] >= 1
     assert masks.skin_diagnostics["ambiguous_pixels"] >= 750
     assert any("Неоднозначные" in value for value in masks.warnings)
 
@@ -263,7 +270,7 @@ def test_four_orientations_are_inverted_to_source_coordinates(best_rotation):
     def predict(rgb):
         seen.append(rgb.shape)
         marker = cv2.resize(rgb[..., 0], (256, 256), interpolation=cv2.INTER_NEAREST)
-        if len(seen) - 1 != best_rotation:
+        if len(seen) - 1 not in {best_rotation, (best_rotation + 1) % 4}:
             marker *= 0
         output = np.zeros((256, 256, 6), np.float32)
         output[..., 0] = 1 - marker
@@ -278,4 +285,227 @@ def test_four_orientations_are_inverted_to_source_coordinates(best_rotation):
     assert result.skin[30, 35] > 0.99
     assert result.skin[65, 90] == 0
     assert result.diagnostics["inference_calls"] == 4
-    assert result.diagnostics["selected_quarter_turns"] == [best_rotation]
+    assert result.consensus[30, 35] == 1
+    assert [v.quarter_turns for v in result.views] == [0, 1, 2, 3]
+    assert set(result.class_maps) == set(SKIN_CLASS_NAMES)
+
+
+def probabilities(skin=0.0, clothes=0.0, shape=(30, 40)):
+    result = np.zeros((*shape, 6), np.float32)
+    result[..., 0] = 1 - skin - clothes
+    result[..., 2] = skin
+    result[..., 4] = clothes
+    return result
+
+
+def view(p, rotation, *, source="full-frame", region=None):
+    return SkinView(p, region or (0, 0, p.shape[1], p.shape[0]), rotation, source=source)
+
+
+def test_one_skin_orientation_does_not_pass_without_geometric_corroboration():
+    prediction = fuse_skin_views(
+        [
+            view(probabilities(skin=0.96), 0),
+            view(probabilities(), 1),
+            view(probabilities(), 2),
+            view(probabilities(), 3),
+        ],
+        (30, 40),
+    )
+    assert not prediction.consensus.any()
+    assert prediction.diagnostics["unconfirmed_pixels"] == 1200
+
+
+def test_two_supporting_orientations_recover_skin_despite_background_views():
+    prediction = fuse_skin_views(
+        [
+            view(probabilities(skin=0.96), 0),
+            view(probabilities(skin=0.94), 1),
+            view(probabilities(), 2),
+            view(probabilities(), 3),
+        ],
+        (30, 40),
+    )
+    assert prediction.consensus.all()
+    np.testing.assert_allclose(prediction.skin, 0.95)
+    assert prediction.person.min() > 0.9
+    assert prediction.class_maps["body_skin"].mean() == pytest.approx(0.95)
+
+
+def test_duplicate_geometry_cannot_count_as_two_independent_observations():
+    p = probabilities(skin=0.96)
+    prediction = fuse_skin_views([view(p, 0), view(p.copy(), 0)], (30, 40))
+    assert not prediction.consensus.any()
+    assert prediction.diagnostics["view_count"] == 1
+
+
+def test_conflicting_skin_and_clothing_views_abstain_instead_of_max_union():
+    prediction = fuse_skin_views(
+        [
+            view(probabilities(skin=0.96), 0),
+            view(probabilities(skin=0.94), 1),
+            view(probabilities(clothes=0.96), 2),
+            view(probabilities(clothes=0.96), 3),
+        ],
+        (30, 40),
+    )
+    assert not prediction.consensus.any()
+    assert prediction.exclusion.min() == 1
+    assert prediction.diagnostics["conflicting_pixels"] == 1200
+
+
+def test_worse_crop_cannot_overwrite_local_full_frame_clothing_consensus():
+    views = [view(probabilities(clothes=0.96), rotation) for rotation in range(4)]
+    crop = probabilities(skin=0.99, shape=(20, 20))
+    views += [
+        view(crop.copy(), rotation, source="person-crop", region=(10, 5, 30, 25))
+        for rotation in range(4)
+    ]
+    prediction = fuse_skin_views(views, (30, 40))
+    assert not prediction.consensus[15, 20]
+    assert prediction.exclusion[15, 20] == 1
+    assert prediction.class_maps["clothes"][15, 20] > 0
+
+
+def test_partial_low_score_component_does_not_erase_confident_components():
+    rgb, person, prediction = semantic_scene()
+    prediction.skin[20:50, 30:55] = 0.7
+    masks = build_masks(rgb, person_probability=person, skin_prediction=prediction)
+    assert masks.skin[35, 40] == 0
+    assert masks.skin[35, 80] > 0.9
+    assert masks.skin_status == "needs-review"
+    assert masks.skin_confidence == pytest.approx(0.96)
+    assert masks.skin_diagnostics["automatic_accepted"]
+    assert masks.skin_diagnostics["accepted_components"] == 2
+    assert masks.skin_diagnostics["rejected_components"] == 1
+    assert masks.skin_diagnostics["rejection_reasons"]["low_score"] == 1
+    assert any("Уверенные участки обрабатываются" in x for x in masks.warnings)
+    assert not any("автоматическая коррекция отключена" in x for x in masks.warnings)
+
+
+def test_unconfirmed_prediction_does_not_pass_mask_builder_even_with_high_average():
+    rgb, person, prediction = semantic_scene()
+    from dataclasses import replace
+
+    unconfirmed = replace(prediction, consensus=np.zeros_like(person))
+    masks = build_masks(rgb, person_probability=person, skin_prediction=unconfirmed)
+    assert masks.skin.max() == 0
+    assert not masks.skin_diagnostics["automatic_accepted"]
+
+
+def test_proxy_cache_is_bounded_and_isolated_from_mutable_results():
+    p = SkinPrediction(
+        np.ones((5, 5), np.float32), np.ones((5, 5), np.float32), np.zeros((5, 5), np.float32)
+    )
+    cache = RawPredictionCache(max_bytes=601)
+    cache.put("one", p)
+    cache.put("two", p)
+    assert cache.bytes == 600
+    first = cache.get("one")
+    first.skin[:] = 0
+    assert cache.get("one").skin.min() == 1
+    p.skin[:] = 0
+    assert cache.get("two").skin.min() == 1
+    assert cache.get("one") is not None  # one is now most recently used
+    cache.put("three", p)
+    assert cache.get("two") is None
+    assert cache.get("one") is not None
+    assert cache.bytes <= 601
+    cache.clear()
+    assert cache.bytes == 0
+    assert cache.get("one") is None
+
+
+def test_inference_cache_uses_source_and_hint_content_and_does_not_alias():
+    segmenter = object.__new__(SelfieSkinSegmenter)
+    segmenter.lock = Lock()
+    calls = []
+
+    def predict(rgb):
+        calls.append(rgb.shape)
+        return probabilities(skin=0.96, shape=rgb.shape[:2])
+
+    segmenter._predict = predict
+    rgb = np.full((40, 50, 3), 0.3, np.float32)
+    first = segmenter.infer(rgb)
+    assert len(calls) == 4
+    first.skin[:] = 0
+    first.class_maps["body_skin"][:] = 0
+    first.views[0].probabilities[:] = 0
+    second = segmenter.infer(rgb)
+    assert len(calls) == 4 and second.diagnostics["cache_hit"]
+    assert second.skin.min() > 0.9
+    assert second.class_maps["body_skin"].min() > 0.9
+    assert second.views[0].probabilities.max() > 0.9
+    changed = rgb.copy()
+    changed[0, 0] = 0.31
+    segmenter.infer(changed)
+    assert len(calls) == 8
+    segmenter.infer(rgb, np.full(rgb.shape[:2], 0.1, np.float32))
+    assert len(calls) == 12
+
+
+def test_alternative_model_provenance_survives_masks_without_rasters():
+    from dataclasses import replace
+
+    rgb, person, prediction = semantic_scene()
+    candidate = replace(
+        prediction,
+        model_id="candidate",
+        algorithm_version="candidate-v2",
+        models=({"id": "candidate", "sha256": "a" * 64},),
+    )
+    masks = build_masks(rgb, person_probability=person, skin_prediction=candidate)
+    metadata = masks.to_metadata()
+    assert metadata["skin_source"] == "candidate"
+    assert metadata["skin_algorithm_version"] == "candidate-v2"
+    assert metadata["skin_models"] == [{"id": "candidate", "sha256": "a" * 64}]
+    metadata["skin_models"][0]["id"] = "changed"
+    assert masks.skin_models[0]["id"] == "candidate"
+
+
+def test_strong_hair_evidence_is_not_outvoted_by_skin_majority():
+    hair = probabilities()
+    hair[..., 0] = 0.02
+    hair[..., 1] = 0.98
+    prediction = fuse_skin_views(
+        [view(probabilities(skin=0.98), rotation) for rotation in (0, 1, 2)] + [view(hair, 3)],
+        (30, 40),
+    )
+    assert not prediction.consensus.any()
+    assert prediction.exclusion.min() == 1
+    assert prediction.diagnostics["conflicting_pixels"] == 1200
+    assert prediction.class_maps["hair"].mean() > 0
+
+
+def test_numpy_crop_coordinates_and_realistic_view_metadata_are_json_safe():
+    import json
+
+    segmenter = object.__new__(SelfieSkinSegmenter)
+    segmenter.lock = Lock()
+    segmenter._predict = lambda rgb: probabilities(skin=0.96, shape=rgb.shape[:2])
+    rgb = np.full((80, 120, 3), 0.3, np.float32)
+    hint = np.zeros(rgb.shape[:2], np.float32)
+    hint[25:45, 40:60] = 0.99
+    prediction = segmenter.infer(rgb, hint)
+    assert prediction.diagnostics["crop_count"] > 0
+    metadata = build_masks(rgb, person_probability=hint, skin_prediction=prediction).to_metadata()
+    assert json.loads(json.dumps(metadata))["skin_models"][0]["id"] == SKIN_MODEL_ID
+    for source in metadata["skin_diagnostics"]["views"]:
+        assert all(type(value) is int for value in source["region"])
+
+
+def test_small_confirmed_hand_survives_whole_frame_area_floor_with_other_skin():
+    rgb = np.full((1000, 1600, 3), [0.05, 0.3, 0.4], np.float32)
+    person = np.zeros(rgb.shape[:2], np.float32)
+    person[100:500, 100:700] = 0.99
+    skin = np.zeros_like(person)
+    skin[150:350, 150:350] = 0.95
+    skin[400:408, 600:608] = 0.95  # 64 pixels, below the old total-area floor of80
+    prediction = SkinPrediction(skin, person, np.zeros_like(person))
+    masks = build_masks(rgb, person_probability=person, skin_prediction=prediction)
+    assert masks.skin[404, 604] > 0.5  # normal edge feathering remains active
+    assert masks.skin_diagnostics["accepted_components"] == 2
+    skin[150:350, 150:350] = 0
+    alone = build_masks(rgb, person_probability=person, skin_prediction=prediction)
+    assert not alone.skin.any()  # the original total-evidence safeguard remains

@@ -144,7 +144,7 @@ def test_preview_rebases_both_tracks_to_same_actual_video_origin(videos, tmp_pat
     assert report["verification"]["audio_verified"]
 
 
-def _recording_semantic_trackers(monkeypatch):
+def _recording_semantic_trackers(monkeypatch, *, partial=False):
     """Use actual optical flow with colour-independent semantic maps and log private alphas."""
     trackers = []
 
@@ -169,7 +169,12 @@ def _recording_semantic_trackers(monkeypatch):
                 0.95,
                 0.5,
                 skin_source="selfie-multiclass-v1",
-                skin_status="automatic",
+                skin_status="needs-review" if partial else "automatic",
+                skin_diagnostics={
+                    "automatic_accepted": True,
+                    "accepted_components": 1,
+                    "rejected_components": int(partial),
+                },
                 skin_exclusion=np.zeros_like(skin),
             )
 
@@ -182,10 +187,11 @@ def _recording_semantic_trackers(monkeypatch):
     return trackers
 
 
+@pytest.mark.parametrize("partial", [False, True])
 def test_preview_masks_replay_source_history_and_match_full_export_at_same_pts(
-    videos, tmp_path, monkeypatch
+    videos, tmp_path, monkeypatch, partial
 ):
-    trackers = _recording_semantic_trackers(monkeypatch)
+    trackers = _recording_semantic_trackers(monkeypatch, partial=partial)
     source = videos["vfr_offset"]
     source_digest = sha256_file(source)
     plan = analyze_video(source)
@@ -235,10 +241,11 @@ def test_preview_masks_replay_source_history_and_match_full_export_at_same_pts(
     assert sha256_file(source) == source_digest
 
 
+@pytest.mark.parametrize("partial", [False, True])
 def test_interactive_frame_masks_match_full_export_history_at_nonzero_vfr_pts(
-    videos, tmp_path, monkeypatch
+    videos, tmp_path, monkeypatch, partial
 ):
-    trackers = _recording_semantic_trackers(monkeypatch)
+    trackers = _recording_semantic_trackers(monkeypatch, partial=partial)
     source = videos["vfr_offset"]
     digest = sha256_file(source)
     info, plan = probe_video(source), analyze_video(source)
@@ -264,6 +271,9 @@ def test_interactive_frame_masks_match_full_export_history_at_nonzero_vfr_pts(
         preview.masks.skin,
         cv2.resize(full.observations[selected][1], (160, 90), interpolation=cv2.INTER_LINEAR),
     )
+    assert np.any(preview.masks.skin > 0)
+    if partial:
+        assert preview.masks.skin_status == "needs-review"
     assert sha256_file(source) == digest
 
 
