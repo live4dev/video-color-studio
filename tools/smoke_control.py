@@ -123,6 +123,34 @@ async def exercise(output: Path, adapter: Path | None, application: Path | None)
             records = listed["media"]
             assert len(records) == 3
             ids = [record["media_id"] for record in records]
+            reference = await call(
+                client,
+                "set_reference",
+                {
+                    "session_id": session,
+                    "source": "frame",
+                    "media_id": ids[0],
+                    "time_seconds": 0.5,
+                    "expected_revisions": {r["media_id"]: r["revision"] for r in records},
+                    "request_id": "smoke-reference-frame",
+                },
+            )
+            reference_job = await wait_job(client, session, reference["job_id"])
+            assert (
+                reference_job["result"]["reference"]["source_sha256"] == checksums[str(inputs[0])]
+            )
+            records = (await call(client, "list_media", {"session_id": session}))["media"]
+            cleared = await call(
+                client,
+                "set_reference",
+                {
+                    "session_id": session,
+                    "source": "clear",
+                    "expected_revisions": {r["media_id"]: r["revision"] for r in records},
+                },
+            )
+            assert cleared["reference"] is None
+            records = (await call(client, "list_media", {"session_id": session}))["media"]
             await call(
                 client,
                 "set_grade",
@@ -176,6 +204,39 @@ async def exercise(output: Path, adapter: Path | None, application: Path | None)
             exported = await call(client, "export_media", export_params)
             duplicate = await call(client, "export_media", export_params)
             assert duplicate["job_id"] == exported["job_id"]
+            pending_preview = await call(
+                client,
+                "render_preview",
+                {
+                    "session_id": session,
+                    "media_id": ids[1],
+                    "duration_seconds": 1.5,
+                    "start_seconds": 0,
+                    "request_id": "smoke-cancelled-preview",
+                },
+            )
+            cancelled = await call(
+                client,
+                "cancel_job",
+                {
+                    "session_id": session,
+                    "job_id": pending_preview["job_id"],
+                },
+            )
+            assert cancelled["job"]["cancel_requested"]
+            cancel_deadline = time.monotonic() + 30
+            while cancelled["job"]["status"] not in TERMINAL:
+                assert time.monotonic() < cancel_deadline
+                await anyio.sleep(0.05)
+                cancelled = await call(
+                    client,
+                    "get_job",
+                    {
+                        "session_id": session,
+                        "job_id": pending_preview["job_id"],
+                    },
+                )
+            assert cancelled["job"]["status"] == "cancelled"
             # A later edit must not change a queued/running export's frozen settings.
             records = (await call(client, "list_media", {"session_id": session}))["media"]
             await call(
@@ -245,11 +306,44 @@ async def exercise(output: Path, adapter: Path | None, application: Path | None)
                 assert time.monotonic() < deadline
                 await anyio.sleep(0.1)
             assert state["selected"]["media_id"] == ids[0]
+            loaded = await call(
+                client,
+                "load_project",
+                {
+                    "session_id": session,
+                    "path": str(output / "project.fcsproj"),
+                    "request_id": "smoke-reload-project",
+                },
+            )
+            await wait_job(client, session, loaded["job_id"])
+            restored = await call(client, "connect_session", {})
+            session = restored["session_id"]
+            assert restored["media_count"] == 3
+            restored_media = (await call(client, "list_media", {"session_id": session}))["media"]
+            assert sorted(r["settings"]["temperature"] for r in restored_media) == [
+                0.08,
+                0.08,
+                0.19,
+            ]
+            deadline = time.monotonic() + 60
+            while True:
+                state = await call(client, "get_state", {"session_id": session})
+                if state["queue"]["active_count"] == 0:
+                    break
+                assert time.monotonic() < deadline
+                await anyio.sleep(0.1)
+            exercised = {event["method"] for event in events}
+            assert exercised == {tool.name for tool in tools.tools}
         return {
             "passed": True,
             "adapter": str(adapter) if adapter else "source SDK module",
             "sdk": "2.3.0",
             "tool_count": 15,
+            "functional_tool_names": sorted(exercised),
+            "frame_reference_created_and_cleared": True,
+            "queued_preview_cancelled": True,
+            "saved_project_reloaded": True,
+            "restored_session_idle": True,
             "pid": process_id,
             "session_id": session,
             "state_before_disconnect": before_disconnect["job"]["status"],
