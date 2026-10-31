@@ -218,6 +218,11 @@ uv run --no-sync python tools/smoke_bundle.py
 ```
 
 На целевой ОС доступны `packaging/macos/build.sh` и `packaging/windows/build.ps1`.
+Для первой macOS-сборки используйте `packaging/macos/build.sh`: он собирает и
+устанавливает CPU ONNX Runtime с целевым macOS 13.0 до упаковки приложения.
+Прямой запуск `build_desktop.py` требует уже установленного проверенного runtime;
+обычный `uv sync` может заменить его stock wheel. Подробности —
+[docs/SKIN_MODEL.md](docs/SKIN_MODEL.md).
 PyInstaller onedir сохраняет заменяемые динамические библиотеки. Аудит macOS
 проверяет minimum OS всех Mach-O. Нативное демо открывает настоящее окно; тесты
 используют Qt offscreen. Проверка готового bundle очищает окружение Python и,
