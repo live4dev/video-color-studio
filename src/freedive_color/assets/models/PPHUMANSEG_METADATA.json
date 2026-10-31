@@ -10,5 +10,5 @@
   "license_source": "https://github.com/opencv/opencv_zoo/blob/main/models/human_segmentation_pphumanseg/LICENSE",
   "attribution": "Copyright (c) 2021 PaddlePaddle Authors. All Rights Reserved. Model ported by OpenCV Zoo from PaddleHub.",
   "runtime": "OpenCV DNN CPU; no runtime downloads",
-  "limitations": "General-purpose person silhouette segmentation, not an underwater skin model. Skin uses conservative color candidates inside confident person regions. Low confidence disables automatic skin correction; manual edits remain available."
+  "limitations": "General-purpose person silhouette segmentation, not an underwater skin model. Visible skin is classified separately by the bundled SelfieMulticlass model. Uncertain automatic skin correction is disabled; manual edits remain available."
 }

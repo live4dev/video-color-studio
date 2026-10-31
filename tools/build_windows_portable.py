@@ -30,8 +30,10 @@ from packaging.utils import canonicalize_name, parse_wheel_filename
 from packaging.version import Version
 
 try:
+    from verify_models import verify_models
     from windows_pe import PEImage, inspect_pe
 except ImportError:
+    from tools.verify_models import verify_models
     from tools.windows_pe import PEImage, inspect_pe
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -69,6 +71,9 @@ SYSTEM_DLLS = set(
         "d3d12",
         "d3d9",
         "d3dcompiler_47",
+        # Windows supplies DbgHelp; never redistribute a DLL copied from System32.
+        # https://learn.microsoft.com/windows/win32/debug/dbghelp-versions
+        "dbghelp",
         "dnsapi",
         "dwmapi",
         "dwrite",
@@ -493,6 +498,7 @@ def prepare(
 ) -> dict:
     if stage.exists():
         raise FileExistsError("Stage already exists; choose a new folder or use --finalize-only")
+    verify_models()
     wheels = locked_wheels()
     runtime = acquire(PYTHON_RUNTIME, cache, offline=offline)
     wheel_paths = [(entry, acquire(entry, cache, offline=offline)) for entry in wheels]

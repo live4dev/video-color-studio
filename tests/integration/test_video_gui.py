@@ -2,14 +2,17 @@
 
 import importlib.util
 import json
+from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
 
 import av
+import numpy as np
 import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
 
+from freedive_color.core.masks import BrushStroke, MaskEdits, MaskSet
 from freedive_color.core.project import sha256_file
 from freedive_color.core.reference import create_reference
 from freedive_color.core.session import load_session
@@ -241,6 +244,81 @@ def test_video_selection_cannot_replace_a_later_photo(window, qtbot, video_fixtu
     assert window.video_info is None
     assert not window.video_panel.isVisible()
     assert not window._video_playing
+
+
+def test_gui_passes_tracked_masks_and_reuses_raw_alpha_only_for_color_changes(
+    window, qtbot, video_fixtures, monkeypatch
+):
+    from freedive_color.core import video_pipeline
+    from freedive_color.ui import main_window as ui
+
+    calls, render_masks = [], []
+    original_preview, original_render = video_pipeline.read_video_preview_frame, ui.render_rgb
+
+    def semantic(rgb, *_args, **_kwargs):
+        person = np.ones(rgb.shape[:2], np.float32)
+        return MaskSet(
+            person,
+            person * 0.9,
+            person * 0,
+            person,
+            0.95,
+            0.95,
+            skin_source="selfie-multiclass-v1",
+            skin_status="automatic",
+        )
+
+    monkeypatch.setattr("freedive_color.core.temporal.build_masks", semantic)
+
+    def record_preview(*args, **kwargs):
+        result = original_preview(*args, **kwargs)
+        calls.append((kwargs, result))
+        return result
+
+    def record_render(*args, **kwargs):
+        render_masks.append(kwargs.get("masks"))
+        return original_render(*args, **kwargs)
+
+    monkeypatch.setattr(video_pipeline, "read_video_preview_frame", record_preview)
+    monkeypatch.setattr(ui, "render_rgb", record_render)
+    window.import_paths([video_fixtures / "vfr_offset.mp4"])
+    _ready(qtbot, window)
+    assert len(calls) == 1
+    assert window.preview.video_masks is calls[-1][1].masks is render_masks[-1]
+    assert window._video_plan is calls[-1][1].plan
+
+    # A soft waterline is applied during rendering, never accumulated in cached alpha.
+    edits = MaskEdits(waterline=((0, 0.5), (1, 0.5)))
+    window._mask_changed(edits)
+    _ready(qtbot, window)
+    assert len(calls) == 2
+    assert calls[-1][0]["edits"] == edits
+    raw = window.preview.video_masks
+    expected = window.preview.masks.skin.copy()
+    assert np.any((raw.underwater > 0) & (raw.underwater < 1))
+    assert np.any(expected < raw.skin)
+    for exposure in (0.1, 0.2, -0.1):
+        window.controls.set_settings(replace(window.controls.settings(), exposure=exposure))
+        _ready(qtbot, window)
+        assert len(calls) == 2
+        assert render_masks[-1] is raw
+        np.testing.assert_array_equal(window.preview.masks.skin, expected)
+
+    window.local_controls.set_settings(replace(window.local_controls.settings(), feather=0.012))
+    _ready(qtbot, window)
+    assert len(calls) == 3
+    assert calls[-1][0]["feather"] == pytest.approx(0.012)
+    window._mask_changed(replace(edits, strokes=(BrushStroke("skin", "add", ((0.5, 0.8),), 0.08),)))
+    _ready(qtbot, window)
+    assert len(calls) == 4
+    assert window.preview.masks.skin_status == "manual"
+    assert render_masks[-1] is window.preview.video_masks
+    window.seek_video(0.65)
+    _ready(qtbot, window)
+    assert len(calls) == 5
+    assert calls[-1][0]["plan"] is window._video_plan
+    assert window.preview.timestamp >= 0.65
+    assert all(mask is not None for mask in render_masks)
 
 
 def test_video_one_to_one_loads_original_frame_resolution(window, qtbot, video_fixtures):

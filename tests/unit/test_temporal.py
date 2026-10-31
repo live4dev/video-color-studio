@@ -1,5 +1,6 @@
 from dataclasses import replace
 
+import cv2
 import numpy as np
 import pytest
 
@@ -162,7 +163,18 @@ class FakeSemanticBuilder:
         person = ((rgb[..., 0] > rgb[..., 1]) & (rgb[..., 0] > rgb[..., 2])).astype(np.float32)
         strength = (0.8 if self.calls % 2 else 0.95) if self.alternating else 0.9
         ones = np.ones(rgb.shape[:2], np.float32)
-        return MaskSet(person, person * strength, 1 - person, ones, 0.9, 0.95)
+        return MaskSet(
+            person,
+            person * strength,
+            1 - person,
+            ones,
+            0.9,
+            0.95,
+            skin_source="selfie-multiclass-v1",
+            skin_status="automatic",
+            skin_model_sha256="a" * 64,
+            skin_diagnostics={"score_kind": "uncalibrated-model-probability"},
+        )
 
 
 def centroid(mask):
@@ -259,3 +271,144 @@ def test_fresh_mask_with_low_confidence_cannot_keep_old_skin_alive():
     fresh = replace(builder(rgb), skin_confidence=0)
     masks = tracker.update(rgb, 1 / 30, fresh_masks=fresh)
     assert masks.skin.max() == 0
+
+
+def semantic_patch(rgb):
+    shape = rgb.shape[:2]
+    person = np.zeros(shape, np.float32)
+    person[8:-8, 8:-8] = 1
+    skin = np.zeros(shape, np.float32)
+    skin[30:55, 30:55] = 0.95
+    return MaskSet(
+        person,
+        skin,
+        1 - person,
+        np.ones(shape, np.float32),
+        0.94,
+        0.4,  # The skin classifier is independent of the old silhouette score.
+        skin_source="selfie-multiclass-v1",
+        skin_status="automatic",
+        skin_model_sha256="a" * 64,
+        skin_diagnostics={"score_kind": "uncalibrated-model-probability"},
+        skin_exclusion=np.zeros(shape, np.float32),
+    )
+
+
+@pytest.mark.parametrize("color", [[0.08, 0.32, 0.49], [0.08, 0.26, 0.16], [0.02, 0.035, 0.06]])
+def test_semantic_skin_is_not_vetoed_by_blue_green_or_dark_pixels(color):
+    rgb = blue((96, 160))
+    rgb[30:55, 30:55] = color
+    original = rgb.copy()
+    masks = semantic_patch(rgb)
+    tracker = TemporalMaskTracker(use_model=False, proxy_edge=192)
+    result = tracker.update(rgb, 0, fresh_masks=masks)
+    assert result.skin[42, 42] > 0.9
+    assert result.skin_status == "automatic"
+    assert result.skin_model_sha256 == "a" * 64
+    assert result.skin_diagnostics == masks.skin_diagnostics
+    np.testing.assert_array_equal(rgb, original)
+
+
+def test_semantic_exclusion_removes_hair_or_gear_immediately_without_fading():
+    rgb = textured_subject()
+    masks = semantic_patch(rgb)
+    tracker = TemporalMaskTracker(use_model=False, proxy_edge=192)
+    tracker.update(rgb, 0, fresh_masks=masks)
+    excluded = masks.skin_exclusion.copy()
+    excluded[36:42, 36:42] = 0.95
+    result = tracker.update(rgb, 1 / 30, fresh_masks=replace(masks, skin_exclusion=excluded))
+    assert result.skin[38, 38] == 0
+    assert result.skin[50, 50] > 0.9
+    assert result.skin_exclusion[38, 38] > 0.9
+
+
+@pytest.mark.parametrize("mode", ["empty", "needs-review"])
+def test_fresh_abstention_or_missing_person_clears_old_skin_immediately(mode):
+    rgb = textured_subject()
+    masks = semantic_patch(rgb)
+    tracker = TemporalMaskTracker(use_model=False, proxy_edge=192)
+    tracker.update(rgb, 0, fresh_masks=masks)
+    fresh = (
+        replace(masks, skin=np.zeros_like(masks.skin), person=np.zeros_like(masks.person))
+        if mode == "empty"
+        else replace(masks, skin_status="needs-review")
+    )
+    result = tracker.update(rgb, 1 / 30, fresh_masks=fresh)
+    assert result.skin.max() == 0
+    again = tracker.update(rgb, 2 / 30)
+    assert again.skin.max() == 0
+
+
+def test_small_occlusion_cannot_hide_inside_a_large_person(monkeypatch):
+    monkeypatch.setattr(
+        cv2,
+        "calcOpticalFlowFarneback",
+        lambda current, *_args: np.zeros((*current.shape, 2), np.float32),
+    )
+    rgb = textured_subject()
+    masks = semantic_patch(rgb)
+    tracker = TemporalMaskTracker(use_model=False, proxy_edge=192)
+    tracker.update(rgb, 0, fresh_masks=masks)
+    covered = rgb.copy()
+    covered[40:44, 40:44] = 0.02  # Less than 3% of skin and 0.2% of person.
+    result = tracker.update(covered, 1 / 30)
+    assert result.skin[41, 41] == 0
+    assert result.skin[50, 50] > 0.9
+    assert tracker.skin_rejections == 1
+    assert tracker.flow_failures == 0
+
+
+def test_color_occlusion_with_same_luminance_is_rejected(monkeypatch):
+    monkeypatch.setattr(
+        cv2,
+        "calcOpticalFlowFarneback",
+        lambda current, *_args: np.zeros((*current.shape, 2), np.float32),
+    )
+    rgb = blue((96, 160))
+    rgb[30:55, 30:55] = [0.2, 0.45, 0.4]
+    tracker = TemporalMaskTracker(use_model=False, proxy_edge=192)
+    tracker.update(rgb, 0, fresh_masks=semantic_patch(rgb))
+    covered = rgb.copy()
+    covered[40:44, 40:44] = [0.55, 0.34595, 0.4]
+    luma = np.array([0.2126, 0.7152, 0.0722], np.float32)
+    assert abs(float((covered[41, 41] - rgb[41, 41]) @ luma)) < 1e-4
+    result = tracker.update(covered, 1 / 30)
+    assert result.skin[41, 41] == 0
+    assert result.skin[50, 50] > 0.9
+
+
+def test_flow_failure_discards_history_until_a_new_semantic_observation(monkeypatch):
+    rgb = textured_subject()
+    tracker = TemporalMaskTracker(use_model=False, proxy_edge=192)
+    tracker.update(rgb, 0, fresh_masks=semantic_patch(rgb))
+
+    def failure(*_args):
+        raise cv2.error("failed flow")
+
+    monkeypatch.setattr(cv2, "calcOpticalFlowFarneback", failure)
+    result = tracker.update(rgb, 1 / 30)
+    assert result.skin.max() == 0
+    assert result.skin_status == "needs-review"
+    assert tracker.to_metadata()["skin_status"] == "needs-review"
+    monkeypatch.setattr(
+        cv2,
+        "calcOpticalFlowFarneback",
+        lambda current, *_args: np.zeros((*current.shape, 2), np.float32),
+    )
+    result = tracker.update(rgb, 2 / 30)
+    assert result.skin.max() == 0
+    result = tracker.update(rgb, 3 / 30, fresh_masks=semantic_patch(rgb))
+    assert result.skin[42, 42] > 0
+
+
+def test_default_refresh_uses_half_second_in_source_pts():
+    builder = FakeSemanticBuilder()
+    tracker = TemporalMaskTracker(mask_builder=builder)
+    for timestamp in (100, 100.1, 100.49, 100.5, 100.99, 101):
+        tracker.update(textured_subject(), timestamp, shot_id=0)
+    assert builder.calls == 3
+    metadata = tracker.to_metadata()
+    assert metadata["refresh_seconds"] == 0.5
+    assert metadata["skin_source"] == "selfie-multiclass-v1"
+    assert metadata["skin_model_sha256"] == "a" * 64
+    assert sum(metadata["skin_status_frames"].values()) == 6

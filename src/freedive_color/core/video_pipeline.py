@@ -23,12 +23,12 @@ from .analyze import linear_to_srgb, srgb_to_linear
 from .errors import StudioError
 from .image_pipeline import CancellationToken, _publish, render_rgb
 from .local_pipeline import LocalSettings
-from .masks import MaskEdits
+from .masks import MaskEdits, MaskSet
 from .media_io import signature
 from .presets import GradeSettings
 from .project import json_bytes, sha256_file
 from .reference import PaletteReference
-from .temporal import ShotPlan, TemporalAnalyzer, TemporalMaskTracker
+from .temporal import ShotPlan, TemporalAnalyzer, TemporalMaskTracker, _resize_masks
 
 VIDEO_EXTENSIONS = {".mp4", ".mov"}
 MAX_VIDEO_PIXELS = 4096 * 2304
@@ -419,6 +419,24 @@ def encode_video_frame(rgb: np.ndarray, *, width: int | None = None, height: int
     return frame
 
 
+def _read_source_video_frame(info, time_seconds, token):
+    """Decode the selected source frame without changing its geometry or exact PTS."""
+    target = info.video_start + Fraction(str(time_seconds)).limit_denominator(1_000_000)
+    with open_local_media(info.path) as container:
+        stream = container.streams[info.video_stream_index]
+        container.seek(_tick(target, info.time_base), stream=stream, backward=True, any_frame=False)
+        chosen = None
+        for frame in container.decode(stream):
+            token.check()
+            chosen = frame
+            if _timestamp(frame, info.time_base) >= target:
+                break
+        if chosen is None:
+            raise StudioError("В этой позиции нет видеокадра.")
+        token.check()
+        return decode_video_frame(chosen, info), _timestamp(chosen, info.time_base)
+
+
 def read_video_frame(
     source: str | Path, time_seconds: float = 0, max_edge: int = 1440
 ) -> tuple[np.ndarray, float]:
@@ -428,31 +446,16 @@ def read_video_frame(
     info = probe_video(source)
     _validate_info(info)
     av = require_av()
-    target = info.video_start + Fraction(str(time_seconds)).limit_denominator(1_000_000)
     try:
-        with open_local_media(info.path) as container:
-            stream = container.streams[info.video_stream_index]
-            container.seek(
-                _tick(target, info.time_base), stream=stream, backward=True, any_frame=False
+        rgb, timestamp = _read_source_video_frame(info, time_seconds, CancellationToken())
+        if max(rgb.shape[:2]) > max_edge:
+            scale = max_edge / max(rgb.shape[:2])
+            rgb = cv2.resize(
+                rgb,
+                (max(1, round(rgb.shape[1] * scale)), max(1, round(rgb.shape[0] * scale))),
+                interpolation=cv2.INTER_AREA,
             )
-            chosen = None
-            for frame in container.decode(stream):
-                chosen = frame
-                if _timestamp(frame, info.time_base) >= target:
-                    break
-            if chosen is None:
-                raise StudioError("В этой позиции нет видеокадра.")
-            rgb = decode_video_frame(chosen, info)
-            if max(rgb.shape[:2]) > max_edge:
-                scale = max_edge / max(rgb.shape[:2])
-                rgb = cv2.resize(
-                    rgb,
-                    (max(1, round(rgb.shape[1] * scale)), max(1, round(rgb.shape[0] * scale))),
-                    interpolation=cv2.INTER_AREA,
-                )
-            return rgb.astype(np.float32), float(
-                _timestamp(chosen, info.time_base) - info.video_start
-            )
+        return rgb.astype(np.float32), float(timestamp - info.video_start)
     except StudioError:
         raise
     except (av.FFmpegError, OSError, ValueError) as exc:
@@ -571,6 +574,103 @@ def _frame_iterator(container, stream, info, start, end):
         if end is not None and stamp >= end:
             break
         yield frame
+
+
+def _warm_temporal_masks(source, info, plan, tracker, end, token, progress):
+    """Replay only the current shot's prefix so seeking has full-export mask history.
+
+    Frames before ``end`` update proxy alphas only: they are never encoded or muxed.
+    Decode at source resolution exactly as the export loop does; preview resizing must
+    not alter the semantic model's input or the optical-flow trajectory.
+    """
+    shot_id = plan.shot_at(float(end))
+    start = (
+        _tick(Fraction(str(plan.cuts[shot_id - 1])), info.time_base) * info.time_base
+        if shot_id
+        else info.video_start
+    )
+    if end <= start:
+        return 0, start
+    progress(20, "Подготовка видеомасок к выбранному кадру…")
+    count = 0
+    token.check()
+    with open_local_media(source) as container:
+        stream = container.streams[info.video_stream_index]
+        for frame in _frame_iterator(container, stream, info, start, end):
+            token.check()
+            timestamp = _timestamp(frame, info.time_base)
+            tracker.update(
+                decode_video_frame(frame, info),
+                float(timestamp),
+                shot_id=plan.shot_at(float(timestamp)),
+            )
+            count += 1
+            if count % 6 == 0:
+                progress(20, f"Подготовка видеомасок: {count} кадров")
+    return count, start
+
+
+@dataclass(frozen=True)
+class VideoFramePreview:
+    rgb: np.ndarray
+    timestamp: float
+    masks: MaskSet
+    plan: ShotPlan
+
+
+def read_video_preview_frame(
+    source: str | Path,
+    time_seconds: float = 0,
+    max_edge: int = 1440,
+    *,
+    edits: MaskEdits | None = None,
+    feather: float = 0.006,
+    plan: ShotPlan | dict | None = None,
+    token: CancellationToken | None = None,
+    progress: Callable[[int, str], None] = lambda _value, _message: None,
+) -> VideoFramePreview:
+    """A seekable GUI frame with exactly the mask history used by a full export.
+
+    Semantic inference and flow see source pixels. Only the final frame and alpha maps
+    are resized for the viewer. The returned masks precede waterline/color rendering so
+    repeated color adjustments can reuse them without applying soft alpha twice.
+    """
+    if not math.isfinite(time_seconds) or time_seconds < 0 or max_edge < 1:
+        raise StudioError("Некорректная позиция или размер предпросмотра видео.")
+    token = token or CancellationToken()
+    token.check()
+    info = probe_video(source)
+    _validate_info(info)
+    av = require_av()
+    try:
+        if isinstance(plan, dict):
+            plan = ShotPlan.from_dict(plan)
+        if plan is None:
+            plan = analyze_video(
+                source,
+                token=token,
+                progress=lambda value, message: progress(round(value * 0.2), message),
+            )
+        if not isinstance(plan, ShotPlan) or abs(plan.start_time - float(info.video_start)) > float(
+            info.time_base
+        ):
+            raise StudioError("План анализа не соответствует временной шкале исходника.")
+        rgb, timestamp = _read_source_video_frame(info, time_seconds, token)
+        tracker = TemporalMaskTracker(edits or MaskEdits(), feather=feather)
+        _warm_temporal_masks(source, info, plan, tracker, timestamp, token, progress)
+        token.check()
+        masks = tracker.update(rgb, float(timestamp), shot_id=plan.shot_at(float(timestamp)))
+        if max(rgb.shape[:2]) > max_edge:
+            scale = max_edge / max(rgb.shape[:2])
+            size = max(1, round(rgb.shape[1] * scale)), max(1, round(rgb.shape[0] * scale))
+            rgb = cv2.resize(rgb, size, interpolation=cv2.INTER_AREA)
+            masks = _resize_masks(masks, size)
+        token.check()
+        return VideoFramePreview(rgb, float(timestamp - info.video_start), masks, plan)
+    except StudioError:
+        raise
+    except (av.FFmpegError, OSError, ValueError) as exc:
+        raise StudioError("Не удалось подготовить кадр и маски видео.") from exc
 
 
 def _audio_iterator(container, streams, start, end):
@@ -871,6 +971,11 @@ def export_video(
                 raise StudioError("В выбранном диапазоне нет видеокадров.")
             actual_start = _timestamp(frame, info.time_base)
             shift = actual_start if is_preview else Fraction(0)
+            warmup_frames, mask_history_start = 0, actual_start
+            if tracker and is_preview and actual_start > info.video_start:
+                warmup_frames, mask_history_start = _warm_temporal_masks(
+                    source, info, plan, tracker, actual_start, token, progress
+                )
             audio_packets = _audio_iterator(
                 audio_input,
                 list(audio_input.streams.audio),
@@ -936,14 +1041,16 @@ def export_video(
                     if frame is not None and (audio_packet is None or video_time <= audio_time):
                         following_frame = next(frames, None)
                         rgb = decode_video_frame(frame, info)
-                        if scale < 1:
-                            rgb = cv2.resize(rgb, (width, height), interpolation=cv2.INTER_AREA)
                         shot_id = plan.shot_at(float(video_time))
                         masks = (
                             tracker.update(rgb, float(video_time), shot_id=shot_id)
                             if tracker
                             else None
                         )
+                        if scale < 1:
+                            rgb = cv2.resize(rgb, (width, height), interpolation=cv2.INTER_AREA)
+                            if masks is not None:
+                                masks = _resize_masks(masks, (width, height))
                         if masks:
                             warnings.extend(
                                 message for message in masks.warnings if message not in warnings
@@ -1057,6 +1164,8 @@ def export_video(
                 "actual_source_start": _rational(actual_start),
                 "common_pts_shift": _rational(shift),
                 "audio_cut": "Original packets, common shift, no audio re-encoding",
+                "mask_warmup_frames": warmup_frames,
+                "mask_history_source_start": _rational(mask_history_start),
             },
             "temporal_masks": tracker.to_metadata() if tracker else None,
             "backend": backend_versions(),

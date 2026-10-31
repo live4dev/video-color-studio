@@ -12,6 +12,7 @@ license = "MIT"
 dependencies = [
   "numpy>=2.2,<3",
   "opencv-python-headless==4.14.0.94",
+  "onnxruntime==1.23.2",
   "Pillow>=11.1,<14",
   "PySide6-Essentials==6.8.3",
   "tifffile>=2025.1.10",

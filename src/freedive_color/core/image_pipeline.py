@@ -47,6 +47,9 @@ class Preview:
     reference: object | None = None
     video_info: object | None = None
     timestamp: float = 0
+    # In-memory video state only; projects retain their existing versioned schema.
+    video_plan: object | None = None
+    video_masks: object | None = None
 
 
 def render_rgb(

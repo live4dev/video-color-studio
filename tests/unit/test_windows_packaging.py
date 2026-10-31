@@ -3,8 +3,9 @@
 import importlib
 import json
 import struct
+import subprocess
 import zipfile
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import pytest
 
@@ -17,7 +18,7 @@ def win(monkeypatch):
     return importlib.import_module("tools.build_windows_portable")
 
 
-def small_pe(*, imported="kernel32.dll", subsystem=2):
+def small_pe(*, imported="kernel32.dll", subsystem=2, function_name="GetModuleFileNameW"):
     data = bytearray(0x1000)
     data[:2] = b"MZ"
     struct.pack_into("<I", data, 0x3C, 0x80)
@@ -35,7 +36,7 @@ def small_pe(*, imported="kernel32.dll", subsystem=2):
     struct.pack_into("<5I", data, 0x300, 0x1200, 0, 0, 0x1300, 0x1200)
     struct.pack_into("<QQ", data, 0x400, 0x1400, 0)
     data[0x500 : 0x500 + len(imported) + 1] = imported.encode() + b"\0"
-    symbol = b"\0\0GetModuleFileNameW\0"
+    symbol = b"\0\0" + function_name.encode("ascii") + b"\0"
     data[0x600 : 0x600 + len(symbol)] = symbol
     return bytes(data)
 
@@ -124,12 +125,28 @@ def test_unknown_required_dll_and_unexpected_cv_plugin_import_fail_closed(win, t
         win.native_audit(tmp_path, trim_qt=True)
 
 
+def test_ort_dbghelp_import_is_a_reported_windows_os_dependency(win, tmp_path):
+    # The locked ORT wheel imports SymFromAddr/ImageDirectoryEntryToData from the
+    # Windows-provided DbgHelp 5.1+ API; no SDK/debugger DLL is bundled or downloaded.
+    path = tmp_path / "onnxruntime_pybind11_state.pyd"
+    path.write_bytes(small_pe(imported="dbghelp.dll", function_name="SymFromAddr"))
+    report = win.native_audit(tmp_path)
+    assert report["system_imports"] == ["dbghelp.dll"]
+    assert len(report["native_files"]) == 1
+    assert not (tmp_path / "dbghelp.dll").exists()
+    path.write_bytes(small_pe(imported="missing-vendor-runtime.dll"))
+    with pytest.raises(ValueError, match="Unbundled native dependency missing-vendor-runtime.dll"):
+        win.native_audit(tmp_path)
+
+
 def test_real_project_resolves_windows_profile_and_stable_abi_wheels(win):
     wheels = win.locked_wheels()
     assert len(wheels) == len({entry["package"] for entry in wheels})
     by_name = {entry["package"]: entry for entry in wheels}
     assert {"mcp", "mcp-types", "pywin32", "cryptography", "cffi"} <= by_name.keys()
     assert by_name["av"]["version"] == "16.1.0"
+    assert by_name["onnxruntime"]["version"] == "1.23.2"
+    assert "cp313-cp313-win_amd64" in by_name["onnxruntime"]["filename"]
     assert "cp313-cp313-win_amd64" in by_name["av"]["filename"]
     assert "cp39-abi3-win_amd64" in by_name["pyside6-essentials"]["filename"]
     assert by_name["tifffile"]["filename"].endswith("py3-none-any.whl")
@@ -182,6 +199,79 @@ def test_windows_opencv_failed_command_surfaces_compiler_error(win, tmp_path, mo
         opencv.build(work, tmp_path / "cache", None, 1, True)
     manifest = json.loads((work / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["status"] == "failed" and manifest["returncode"] == 23
+
+
+@pytest.fixture
+def cmake_tool():
+    host = importlib.import_module("tools.windows_native_host")
+    try:
+        return host.find_host_tool("cmake")
+    except RuntimeError:
+        pytest.skip("This regression executes the developer CMake parser; install cmake to run it")
+
+
+@pytest.mark.parametrize(
+    "original,expected",
+    [
+        (r"D:\a\build\zig-rc.exe", "D:/a/build/zig-rc.exe"),
+        (
+            PureWindowsPath(r"C:\Users\Test User\Дайвинг\zig-cxx.exe"),
+            "C:/Users/Test User/Дайвинг/zig-cxx.exe",
+        ),
+        (r"\\server\share\build folder\zig-rc.exe", "//server/share/build folder/zig-rc.exe"),
+        (Path("/project with spaces/Дайвинг/zig-rc"), "/project with spaces/Дайвинг/zig-rc"),
+    ],
+)
+def test_cmake_path_preserves_drive_unc_spaces_and_unicode(original, expected):
+    opencv = importlib.import_module("tools.build_windows_opencv")
+    assert opencv.cmake_path(original) == expected
+
+
+def test_raw_windows_rc_path_reproduces_the_actual_cmake_parse_failure(cmake_tool, tmp_path):
+    script = tmp_path / "broken-compiler.cmake"
+    script.write_text(
+        'cmake_minimum_required(VERSION 3.10)\nset(CMAKE_RC_COMPILER "'
+        + r"D:\a\video-color-studio\build\wrappers\zig-rc.exe"
+        + '")\n',
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [str(cmake_tool), "-P", str(script)], capture_output=True, encoding="utf-8"
+    )
+    assert result.returncode != 0
+    assert "Invalid character escape" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "original,expected",
+    [
+        (
+            r"D:\a\video-color-studio\build\wrappers\zig-rc.exe",
+            "D:/a/video-color-studio/build/wrappers/zig-rc.exe",
+        ),
+        (
+            PureWindowsPath(r"C:\Users\Test User\Дайвинг\zig-cxx.exe"),
+            "C:/Users/Test User/Дайвинг/zig-cxx.exe",
+        ),
+        (r"\\server\share\build folder\zig-rc.exe", "//server/share/build folder/zig-rc.exe"),
+    ],
+)
+def test_normalized_compiler_path_roundtrips_through_real_cmake(
+    cmake_tool, tmp_path, original, expected
+):
+    opencv = importlib.import_module("tools.build_windows_opencv")
+    observed = tmp_path / "parsed-path.txt"
+    script = tmp_path / "compiler.cmake"
+    script.write_text(
+        'cmake_minimum_required(VERSION 3.10)\nset(CMAKE_RC_COMPILER "'
+        + opencv.cmake_path(original)
+        + '")\nfile(WRITE "'
+        + observed.as_posix()
+        + '" "${CMAKE_RC_COMPILER}")\n',
+        encoding="utf-8",
+    )
+    subprocess.run([str(cmake_tool), "-P", str(script)], check=True, capture_output=True)
+    assert observed.read_text(encoding="utf-8") == expected
 
 
 def test_final_zip_requires_positive_matching_windows_source_scope(win, tmp_path):

@@ -317,7 +317,7 @@ def main() -> None:
     print(
         json.dumps(
             check(args.stage, args.output, static_only=args.static_only, offscreen=args.offscreen),
-            ensure_ascii=False,
+            ensure_ascii=True,
         ),
         flush=True,
     )

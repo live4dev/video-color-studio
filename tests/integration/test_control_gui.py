@@ -300,9 +300,12 @@ def test_switch_video_during_gui_proxy_never_assigns_old_plan_to_new_file(
     from tools.generate_video_fixtures import generate
 
     window, controller = shared_window
-    paths = list(
-        generate(tmp_path / "clips", duration=1.0, width=192, height=108, rate=4).values()
-    )[:2]
+    clips = generate(tmp_path / "clips", duration=1.0, width=192, height=108, rate=4)
+    paths = [clips["static"], clips["vfr_offset"]]
+    # Distinct clocks make copying the previous file's plan observable even if both
+    # clips show the same scene. The selected file now legitimately creates its own plan.
+    plans = [pipeline.analyze_video(path) for path in paths]
+    assert plans[0] != plans[1]
     window.import_paths(paths)
     _ready(qtbot, window)
     entered, release = threading.Event(), threading.Event()
@@ -326,5 +329,16 @@ def test_switch_video_during_gui_proxy_never_assigns_old_plan_to_new_file(
     _ready(qtbot, window)
     assert window.preview.photo.path == paths[1]
     assert window.video_preview_path is None
-    assert "shot_plan" not in controller.read_record(second.media_id).item.media_info
-    assert "shot_plan" in controller.read_record(first.media_id).item.media_info
+    assert (
+        pipeline.ShotPlan.from_dict(
+            controller.read_record(second.media_id).item.media_info["shot_plan"]
+        )
+        == plans[1]
+    )
+    assert (
+        pipeline.ShotPlan.from_dict(
+            controller.read_record(first.media_id).item.media_info["shot_plan"]
+        )
+        == plans[0]
+    )
+    assert window._video_plan == plans[1]

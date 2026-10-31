@@ -7,16 +7,19 @@ from fractions import Fraction
 from pathlib import Path
 
 import av
+import cv2
 import numpy as np
 import pytest
 
+from freedive_color.core import video_pipeline
 from freedive_color.core.errors import Cancelled, StudioError
 from freedive_color.core.image_pipeline import CancellationToken
 from freedive_color.core.local_pipeline import LocalSettings
+from freedive_color.core.masks import MaskSet
 from freedive_color.core.presets import get_preset
 from freedive_color.core.project import sha256_file
 from freedive_color.core.reference import PaletteReference
-from freedive_color.core.temporal import ShotPlan
+from freedive_color.core.temporal import FrameAnchor, ShotPlan, TemporalMaskTracker
 from freedive_color.core.video_pipeline import (
     analyze_video,
     decode_video_frame,
@@ -24,6 +27,7 @@ from freedive_color.core.video_pipeline import (
     export_video,
     probe_video,
     read_video_frame,
+    read_video_preview_frame,
 )
 from freedive_color.integrations.ffmpeg import open_local_media
 
@@ -138,6 +142,199 @@ def test_preview_rebases_both_tracks_to_same_actual_video_origin(videos, tmp_pat
         assert (pts + shift, dts + shift) == source_audio[payload]
     assert probe_video(output).audio_streams[0].start_time > 0
     assert report["verification"]["audio_verified"]
+
+
+def _recording_semantic_trackers(monkeypatch):
+    """Use actual optical flow with colour-independent semantic maps and log private alphas."""
+    trackers = []
+
+    class RecordingTracker(TemporalMaskTracker):
+        def __init__(self, *args, **kwargs):
+            self.observations = {}
+            self.semantic_calls = 0
+            super().__init__(*args, **kwargs, mask_builder=self.semantic)
+            trackers.append(self)
+
+        def semantic(self, rgb, *_args, **_kwargs):
+            self.semantic_calls += 1
+            height, width = rgb.shape[:2]
+            person = np.zeros((height, width), np.float32)
+            person[height // 5 : height * 4 // 5, width // 5 : width * 4 // 5] = 1
+            skin = person * (0.85 if self.semantic_calls % 2 else 0.95)
+            return MaskSet(
+                person,
+                skin,
+                1 - person,
+                np.ones_like(person),
+                0.95,
+                0.5,
+                skin_source="selfie-multiclass-v1",
+                skin_status="automatic",
+                skin_exclusion=np.zeros_like(skin),
+            )
+
+        def update(self, rgb, timestamp, **kwargs):
+            result = super().update(rgb, timestamp, **kwargs)
+            self.observations[timestamp] = (rgb.shape, result.skin.copy())
+            return result
+
+    monkeypatch.setattr(video_pipeline, "TemporalMaskTracker", RecordingTracker)
+    return trackers
+
+
+def test_preview_masks_replay_source_history_and_match_full_export_at_same_pts(
+    videos, tmp_path, monkeypatch
+):
+    trackers = _recording_semantic_trackers(monkeypatch)
+    source = videos["vfr_offset"]
+    source_digest = sha256_file(source)
+    plan = analyze_video(source)
+    settings = get_preset("natural")
+    local = LocalSettings()
+    full_report = export_video(
+        source, tmp_path / "full.mp4", settings, local_settings=local, plan=plan
+    )
+    rendered_masks = []
+    original_render = video_pipeline.render_rgb
+
+    def record_render(rgb, *args, **kwargs):
+        rendered_masks.append(kwargs["masks"].skin.copy())
+        return original_render(rgb, *args, **kwargs)
+
+    monkeypatch.setattr(video_pipeline, "render_rgb", record_render)
+    preview_report = export_video(
+        source,
+        tmp_path / "preview-local.mp4",
+        settings,
+        local_settings=local,
+        preview_start=0.2,
+        preview_seconds=0.35,
+        proxy_edge=160,
+        plan=plan,
+    )
+    full, preview = trackers
+    actual_start = preview_report["preview"]["actual_source_start"]["seconds"]
+    output_stamps = sorted(
+        timestamp for timestamp in preview.observations if timestamp >= actual_start
+    )
+    assert preview_report["preview"]["mask_warmup_frames"] == sum(
+        timestamp < actual_start for timestamp in preview.observations
+    )
+    assert preview_report["preview"]["mask_warmup_frames"] > 0
+    assert len(rendered_masks) == preview_report["output"]["frame_count"] == len(output_stamps)
+    assert full_report["preview"]["mask_warmup_frames"] == 0
+    for timestamp, rendered in zip(output_stamps, rendered_masks, strict=True):
+        source_shape, expected = full.observations[timestamp]
+        preview_shape, actual = preview.observations[timestamp]
+        assert source_shape == preview_shape == (180, 320, 3)
+        np.testing.assert_array_equal(actual, expected)
+        np.testing.assert_allclose(
+            rendered, cv2.resize(expected, (160, 90), interpolation=cv2.INTER_LINEAR), atol=1e-7
+        )
+    assert preview_report["verification"]["audio_verified"]
+    assert sha256_file(source) == source_digest
+
+
+def test_interactive_frame_masks_match_full_export_history_at_nonzero_vfr_pts(
+    videos, tmp_path, monkeypatch
+):
+    trackers = _recording_semantic_trackers(monkeypatch)
+    source = videos["vfr_offset"]
+    digest = sha256_file(source)
+    info, plan = probe_video(source), analyze_video(source)
+    export_video(
+        source,
+        tmp_path / "full-interactive.mp4",
+        get_preset("natural"),
+        local_settings=LocalSettings(),
+        plan=plan,
+    )
+    full = trackers[0]
+    preview = read_video_preview_frame(source, 0.2, 160, plan=plan)
+    selected = max(trackers[1].observations)
+    assert selected - float(info.video_start) == pytest.approx(preview.timestamp)
+    assert preview.plan is plan
+    assert preview.rgb.shape == (90, 160, 3)
+    assert preview.timestamp >= 0.2
+    assert len(trackers[1].observations) > 1  # Includes the shot prefix, not a fresh mask.
+    assert all(shape == (180, 320, 3) for shape, _skin in trackers[1].observations.values())
+    for timestamp, (_shape, skin) in trackers[1].observations.items():
+        np.testing.assert_array_equal(skin, full.observations[timestamp][1])
+    np.testing.assert_array_equal(
+        preview.masks.skin,
+        cv2.resize(full.observations[selected][1], (160, 90), interpolation=cv2.INTER_LINEAR),
+    )
+    assert sha256_file(source) == digest
+
+
+def test_interactive_frame_mask_history_is_cancellable(videos, monkeypatch):
+    trackers = _recording_semantic_trackers(monkeypatch)
+    source = videos["vfr_offset"]
+    plan, token = analyze_video(source), CancellationToken()
+
+    def cancel_before_history(_value, message):
+        if "видеомасок" in message:
+            token.cancel()
+
+    with pytest.raises(Cancelled):
+        read_video_preview_frame(
+            source, 0.2, plan=plan, token=token, progress=cancel_before_history
+        )
+    assert len(trackers) == 1
+    assert trackers[0].observations == {}
+
+
+def test_preview_mask_warmup_starts_at_current_shot_and_is_cancellable(
+    videos, tmp_path, monkeypatch
+):
+    trackers = _recording_semantic_trackers(monkeypatch)
+    source = videos["static"]
+    original = analyze_video(source)
+    cut = Fraction(1, 3)
+    plan = replace(
+        original,
+        anchors=(
+            FrameAnchor(0, original.anchors[0].analysis, shot_id=0),
+            FrameAnchor(float(cut), original.anchors[0].analysis, shot_id=1, frame_index=4),
+        ),
+        cuts=(float(cut),),
+    )
+    report = export_video(
+        source,
+        tmp_path / "after-cut.mp4",
+        get_preset("natural"),
+        local_settings=LocalSettings(),
+        preview_start=0.5,
+        preview_seconds=0.2,
+        plan=plan,
+    )
+    assert min(trackers[0].observations) == float(cut)
+    assert report["preview"]["mask_warmup_frames"] == 2
+    assert report["preview"]["mask_history_source_start"]["seconds"] == pytest.approx(float(cut))
+    token = CancellationToken()
+
+    def progress(_value, message):
+        if "Подготовка видеомасок" in message:
+            token.cancel()
+
+    destination = tmp_path / "cancel-warmup.mp4"
+    digest = sha256_file(source)
+    with pytest.raises(Cancelled):
+        export_video(
+            source,
+            destination,
+            get_preset("natural"),
+            local_settings=LocalSettings(),
+            preview_start=0.5,
+            preview_seconds=0.2,
+            plan=plan,
+            token=token,
+            progress=progress,
+        )
+    assert not destination.exists()
+    assert not destination.with_suffix(".mp4.freedive.json").exists()
+    assert not list(tmp_path.glob(".freedive-video-*"))
+    assert sha256_file(source) == digest
 
 
 def test_static_local_reference_grade_has_no_temporal_pumping_and_plan_replays(videos, tmp_path):

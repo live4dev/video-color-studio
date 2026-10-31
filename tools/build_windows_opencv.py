@@ -81,6 +81,16 @@ BASE_FLAGS = [
 ]
 
 
+def cmake_path(value: os.PathLike[str] | str) -> str:
+    """CMake serializes compiler paths into quoted source: use portable separators.
+
+    Native Windows backslashes such as D:\\a are otherwise emitted unescaped into
+    CMakeRCCompiler.cmake and become invalid escape sequences when it is included.
+    Subprocess arguments remain individual strings, preserving spaces and Unicode.
+    """
+    return os.fspath(value).replace("\\", "/")
+
+
 def loader_source(extension: str = "cv2.pyd") -> str:
     """Native initialization must use cv2, rather than the invalid cv2.cv2 name."""
     if Path(extension).name != extension:
@@ -163,20 +173,20 @@ def build(work: Path, cache: Path, zig_path: Path | None, jobs: int, offline: bo
     target = "x86_64-windows-gnu"
     host = host_plan(work, zig)
     flags = BASE_FLAGS + [
-        f"-DCMAKE_C_COMPILER={host['cc']}",
-        f"-DCMAKE_CXX_COMPILER={host['cxx']}",
-        f"-DCMAKE_AR={host['ar']}",
-        f"-DCMAKE_RANLIB={host['ranlib']}",
-        f"-DCMAKE_RC_COMPILER={host['rc']}",
-        f"-DPYTHON3_EXECUTABLE={sys.executable}",
-        f"-DPYTHON_DEFAULT_EXECUTABLE={sys.executable}",
-        f"-DPYTHON3_INCLUDE_PATH={python / 'include'}",
-        f"-DPYTHON3_INCLUDE_DIR={python / 'include'}",
-        f"-DPYTHON3_LIBRARY={python / 'libs/python3.lib'}",
-        f"-DPYTHON3_LIBRARIES={python / 'libs/python3.lib'}",
-        f"-DPYTHON3_NUMPY_INCLUDE_DIRS={numpy}",
+        f"-DCMAKE_C_COMPILER={cmake_path(host['cc'])}",
+        f"-DCMAKE_CXX_COMPILER={cmake_path(host['cxx'])}",
+        f"-DCMAKE_AR={cmake_path(host['ar'])}",
+        f"-DCMAKE_RANLIB={cmake_path(host['ranlib'])}",
+        f"-DCMAKE_RC_COMPILER={cmake_path(host['rc'])}",
+        f"-DPYTHON3_EXECUTABLE={cmake_path(sys.executable)}",
+        f"-DPYTHON_DEFAULT_EXECUTABLE={cmake_path(sys.executable)}",
+        f"-DPYTHON3_INCLUDE_PATH={cmake_path(python / 'include')}",
+        f"-DPYTHON3_INCLUDE_DIR={cmake_path(python / 'include')}",
+        f"-DPYTHON3_LIBRARY={cmake_path(python / 'libs/python3.lib')}",
+        f"-DPYTHON3_LIBRARIES={cmake_path(python / 'libs/python3.lib')}",
+        f"-DPYTHON3_NUMPY_INCLUDE_DIRS={cmake_path(numpy)}",
         "-DPYTHON3_NUMPY_VERSION=2.5.4",
-        f"-DOPENCV_PYTHON3_INSTALL_PATH={work / 'install'}",
+        f"-DOPENCV_PYTHON3_INSTALL_PATH={cmake_path(work / 'install')}",
         "-DOPENCV_SKIP_PYTHON_LOADER=ON",
         "-DOPENCV_PYTHON3_INSTALL_PATH_SETUPVARS=OFF",
     ]

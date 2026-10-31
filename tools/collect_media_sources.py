@@ -47,6 +47,7 @@ QTBASE = {
 QT_MODULES = {**dict.fromkeys(QTBASE, "qtbase"), "QtSvg": "qtsvg", "QtSvgWidgets": "qtsvg"}
 PROJECT_DIRS = ("src", "tools", "packaging", "docs", "tests", ".github")
 PROJECT_FILES = (
+    ".gitattributes",
     "pyproject.toml",
     "uv.lock",
     "LICENSE",
@@ -168,9 +169,15 @@ def acquire(entry: dict, work: Path, *, offline: bool = False) -> dict:
                 "--silent",
                 "--show-error",
                 "--connect-timeout",
-                "10",
+                "30",
                 "--max-time",
                 str(entry.get("download_timeout", 90)),
+                "--retry",
+                "2",
+                "--retry-delay",
+                "2",
+                "--retry-max-time",
+                "240",
                 "--speed-time",
                 "25",
                 "--speed-limit",
@@ -381,30 +388,49 @@ def extract_notices(archive: Path, output: Path) -> list[dict]:
 
 def extract_msys_notices(archive: Path, output: Path) -> list[dict]:
     """Read original source tarballs/recipes inside a verified MSYS package."""
-    names = subprocess.check_output(["tar", "-tf", str(archive)], text=True).splitlines()
+    zstd = shutil.which("zstd")
+    if zstd is None:
+        raise RuntimeError("zstd is required for developer MSYS source notice collection")
     output.mkdir(parents=True, exist_ok=True)
     notices = []
-    for name in names:
-        if name.endswith((".tar.xz", ".tar.gz", ".tar.bz2")):
-            with tempfile.TemporaryDirectory(dir=output.parent) as temporary:
-                nested = Path(temporary) / Path(name).name
-                with nested.open("wb") as target:
-                    subprocess.run(["tar", "-xOf", str(archive), name], stdout=target, check=True)
-                rows = extract_notices(nested, output)
-                for row in rows:
-                    row["member"] = name + "!/" + row["member"]
-                notices.extend(rows)
-        elif Path(name).name in {"PKGBUILD", ".SRCINFO"}:
-            data = subprocess.check_output(["tar", "-xOf", str(archive), name])
-            (output / Path(name).name).write_bytes(data)
-            notices.append(
-                {
-                    "member": name,
-                    "path": Path(name).name,
-                    "sha256": hashlib.sha256(data).hexdigest(),
-                    "role": "build-recipe",
-                }
+    with tempfile.TemporaryDirectory(dir=output.parent) as temporary:
+        decompressed = Path(temporary) / "msys-source.tar"
+        # Windows tar can close its external zstd pipe while padding remains,
+        # causing a false child exit70. Decode once to EOF and require success.
+        with decompressed.open("wb") as target:
+            subprocess.run(
+                [zstd, "--decompress", "--stdout", str(archive)], stdout=target, check=True
             )
+        with tarfile.open(decompressed, "r:") as source:
+            for member in source:
+                if not member.isfile():
+                    continue
+                name = member.name
+                if name.endswith((".tar.xz", ".tar.gz", ".tar.bz2")):
+                    nested = Path(temporary) / Path(name).name
+                    stream = source.extractfile(member)
+                    assert stream is not None
+                    with stream, nested.open("wb") as target:
+                        shutil.copyfileobj(stream, target, 1024 * 1024)
+                    rows = extract_notices(nested, output)
+                    for row in rows:
+                        row["member"] = name + "!/" + row["member"]
+                    notices.extend(rows)
+                    nested.unlink()
+                elif Path(name).name in {"PKGBUILD", ".SRCINFO"}:
+                    stream = source.extractfile(member)
+                    assert stream is not None
+                    with stream:
+                        data = stream.read()
+                    (output / Path(name).name).write_bytes(data)
+                    notices.append(
+                        {
+                            "member": name,
+                            "path": Path(name).name,
+                            "sha256": hashlib.sha256(data).hexdigest(),
+                            "role": "build-recipe",
+                        }
+                    )
     return notices
 
 
@@ -532,7 +558,7 @@ def collect(
     for notice in lock.get("extra_notices", []):
         source = ROOT / notice["path"]
         if sha256(source) != notice["sha256"]:
-            raise RuntimeError("Explicit native notice checksum mismatch")
+            raise RuntimeError(f"Explicit native notice checksum mismatch: {notice['path']}")
         target = work / "notices/explicit" / source.name
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, target)

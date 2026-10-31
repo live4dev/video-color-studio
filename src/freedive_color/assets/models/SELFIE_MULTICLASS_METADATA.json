@@ -1,0 +1,116 @@
+{
+  "model_id": "selfie-multiclass-v1",
+  "name": "Google MediaPipe SelfieMulticlass 256x256 float32 v1",
+  "file": "selfie_multiclass_256x256.onnx",
+  "bytes": 16381788,
+  "onnx_sha256": "cd2dff0e466a1ce493f2f9d8a9452e2dfbe500695ae4cf77f8d3a57c089c6856",
+  "source_url": "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/1/selfie_multiclass_256x256.tflite",
+  "source_sha256": "c6748b1253a99067ef71f7e26ca71096cd449baefa8f101900ea23016507e0e0",
+  "license": "Apache-2.0",
+  "license_file": "SELFIE_MULTICLASS_LICENSE.txt",
+  "model_card_url": "https://storage.googleapis.com/mediapipe-assets/Model%20Card%20Multiclass%20Segmentation.pdf",
+  "attribution": "Google LLC; original weights unchanged, TFLite converted to ONNX",
+  "conversion": {
+    "python": "3.11",
+    "dependencies": {
+      "tensorflow": "2.15.1",
+      "tf2onnx": "1.16.1",
+      "numpy": "1.26.4",
+      "onnx": "1.17.0",
+      "onnxruntime": "1.23.2",
+      "protobuf": "3.20.3"
+    },
+    "opset": 17,
+    "tool": "tools/convert_skin_model.py",
+    "canonicalization": "content-addressed-inference-dag-v1"
+  },
+  "runtime": "ONNX Runtime 1.23.2 CPU; bundled weights; telemetry disabled; no runtime downloads",
+  "limitations": "General selfie/full-body segmentation, not trained specifically for underwater skin; probability scores are not measured accuracy.",
+  "reference": "official TFLite v1 via TensorFlow Lite CPU",
+  "scope": "numerical conversion parity; not semantic or underwater accuracy",
+  "samples": [
+    {
+      "synthetic_input": 0,
+      "max_abs_error": 7.104873657226562e-05,
+      "argmax_agreement": 1.0
+    },
+    {
+      "synthetic_input": 1,
+      "max_abs_error": 8.702278137207031e-06,
+      "argmax_agreement": 1.0
+    },
+    {
+      "synthetic_input": 2,
+      "max_abs_error": 7.324293255805969e-05,
+      "argmax_agreement": 1.0
+    },
+    {
+      "synthetic_input": 3,
+      "max_abs_error": 5.239248275756836e-05,
+      "argmax_agreement": 1.0
+    },
+    {
+      "synthetic_input": 4,
+      "max_abs_error": 4.2557716369628906e-05,
+      "argmax_agreement": 1.0
+    }
+  ],
+  "input": {
+    "name": "input_29",
+    "shape": [
+      1,
+      256,
+      256,
+      3
+    ],
+    "dtype": "float32",
+    "normalization": "RGB [-1,1] NHWC; normalized_rgb = rgb_float_0_1 * 2 - 1",
+    "normalization_mean": [
+      127.5
+    ],
+    "normalization_std": [
+      127.5
+    ],
+    "range": [
+      -1,
+      1
+    ]
+  },
+  "source_normalization_metadata": {
+    "input_name": "image",
+    "mean": [
+      127.5
+    ],
+    "std": [
+      127.5
+    ],
+    "metadata_sha256": "33f289aca6edeeaf92269baaf2d6650e6267db2ad6f6edf6490a0c88a042f67f"
+  },
+  "output": {
+    "name": "Identity",
+    "shape": [
+      1,
+      256,
+      256,
+      6
+    ],
+    "kind": "logits",
+    "activation": "softmax over final class axis",
+    "classes": [
+      "background",
+      "hair",
+      "body-skin",
+      "face-skin",
+      "clothes",
+      "others"
+    ]
+  },
+  "verification": {
+    "workflow_url": "https://github.com/live4dev/video-color-studio/actions/runs/41193200816",
+    "head_revision": "f27f5b7f0f487ce0312a0b8d2e151fbd43626aa9",
+    "runner": "ubuntu-22.04",
+    "independent_conversions": 2,
+    "byte_identical": true,
+    "local_download_sha256_verified": true
+  }
+}

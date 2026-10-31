@@ -6,7 +6,7 @@ geometrically transformed here. Times are source PTS in seconds, including non-z
 
 from bisect import bisect_right
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from math import exp, isfinite
 
 import cv2
@@ -392,47 +392,59 @@ def build_shot_plan(samples, duration: float | None = None, **kwargs) -> ShotPla
 
 
 def _resize_masks(masks: MaskSet, size: tuple[int, int]) -> MaskSet:
-    arrays = []
+    arrays = {}
     for key in ("person", "skin", "water", "underwater"):
         value = getattr(masks, key)
         if value.ndim != 2 or not np.isfinite(value).all():
             raise StudioError("Некорректная временная маска видео.")
-        arrays.append(
-            np.clip(
-                cv2.resize(value.astype(np.float32), size, interpolation=cv2.INTER_LINEAR), 0, 1
-            )
+        arrays[key] = np.clip(
+            cv2.resize(value.astype(np.float32), size, interpolation=cv2.INTER_LINEAR), 0, 1
         )
-    return MaskSet(
-        *arrays, masks.skin_confidence, masks.person_confidence, masks.warnings, masks.method
+    if masks.skin_exclusion is not None:
+        exclusion = masks.skin_exclusion
+        if exclusion.ndim != 2 or not np.isfinite(exclusion).all():
+            raise StudioError("Некорректная временная маска исключений кожи.")
+        arrays["skin_exclusion"] = np.clip(
+            cv2.resize(exclusion.astype(np.float32), size, interpolation=cv2.INTER_LINEAR), 0, 1
+        )
+    return replace(masks, **arrays)
+
+
+def _skin_available(masks: MaskSet) -> bool:
+    return (
+        masks.skin_status in ("automatic", "manual")
+        and masks.skin_confidence > 0
+        and bool(np.any(masks.skin > 0))
     )
 
 
 def _blend_masks(before: MaskSet, after: MaskSet, amount: float) -> MaskSet:
-    arrays = [
-        np.clip(getattr(before, key) * (1 - amount) + getattr(after, key) * amount, 0, 1)
+    arrays = {
+        key: np.clip(getattr(before, key) * (1 - amount) + getattr(after, key) * amount, 0, 1)
         for key in ("person", "skin", "water", "underwater")
-    ]
-    return MaskSet(
-        *arrays,
-        after.skin_confidence,
-        after.person_confidence,
-        after.warnings,
-        "farneback-alpha-v1",
-    )
+    }
+    # A fresh abstention or disappearance must never fade out old skin over water or gear.
+    # Positive alpha changes remain smoothed; confidently negative classes act immediately.
+    if not _skin_available(after):
+        arrays["skin"] = np.zeros_like(after.skin)
+    if after.skin_exclusion is not None:
+        arrays["skin"][after.skin_exclusion >= 0.5] = 0
+    return replace(after, **arrays, method="farneback-alpha-v2")
 
 
 class TemporalMaskTracker:
     """Periodic semantic refresh with dense backward-flow propagation of alpha only.
 
     Normalized user brush/waterline edits are intentionally reapplied in image coordinates,
-    not presented as tracked object strokes. At most two proxy MaskSets and one gray frame persist.
+    not presented as tracked object strokes. At most two proxy MaskSets and one RGB/gray
+    frame pair persist.
     """
 
     def __init__(
         self,
         edits: MaskEdits | None = None,
         feather: float = 0.006,
-        refresh_seconds: float = 1.0,
+        refresh_seconds: float = 0.5,
         proxy_edge: int = 384,
         mask_builder: Callable | None = None,
         use_model: bool = True,
@@ -451,6 +463,7 @@ class TemporalMaskTracker:
         self.mask_builder = mask_builder or build_masks
         self.use_model = use_model
         self._gray = None
+        self._rgb = None
         self._state = None
         self._target = None
         self._last_time = None
@@ -462,28 +475,36 @@ class TemporalMaskTracker:
         self.frames = 0
         self.resets = 0
         self.flow_failures = 0
+        self.skin_rejections = 0
+        self._last_skin_metadata = {}
+        self.skin_status_frames = {"automatic": 0, "needs-review": 0, "manual": 0}
 
     def _proxy(self, rgb):
         scale = min(1, self.proxy_edge / max(rgb.shape[:2]))
         size = max(1, round(rgb.shape[1] * scale)), max(1, round(rgb.shape[0] * scale))
         return cv2.resize(rgb, size, interpolation=cv2.INTER_AREA)
 
-    def _refresh(self, proxy, timestamp, fresh_masks=None):
+    def _refresh(self, proxy, timestamp, fresh_masks=None, source_rgb=None):
         if fresh_masks is None:
             # A manual box is a static requested analysis region. Brushes and waterline are
             # applied later at the source resolution rather than accumulated in tracked alpha.
             region = MaskEdits(person_box=self.edits.person_box)
-            masks = self.mask_builder(proxy, region, feather=self.feather, use_model=self.use_model)
+            masks = self.mask_builder(
+                source_rgb if source_rgb is not None else proxy,
+                region,
+                feather=self.feather,
+                use_model=self.use_model,
+            )
             self.model_calls += 1
         else:
-            masks = _resize_masks(fresh_masks, (proxy.shape[1], proxy.shape[0]))
+            masks = fresh_masks
         self._last_refresh = timestamp
-        return masks
+        return _resize_masks(masks, (proxy.shape[1], proxy.shape[0]))
 
     @staticmethod
     def _warp(masks, map_x, map_y):
-        arrays = [
-            cv2.remap(
+        arrays = {
+            key: cv2.remap(
                 getattr(masks, key),
                 map_x,
                 map_y,
@@ -492,29 +513,32 @@ class TemporalMaskTracker:
                 borderValue=0,
             )
             for key in ("person", "skin", "water", "underwater")
-        ]
-        return MaskSet(
-            *arrays,
-            masks.skin_confidence,
-            masks.person_confidence,
-            masks.warnings,
-            "farneback-alpha-v1",
-        )
+        }
+        if masks.skin_exclusion is not None:
+            arrays["skin_exclusion"] = cv2.remap(
+                masks.skin_exclusion,
+                map_x,
+                map_y,
+                cv2.INTER_LINEAR,
+                borderMode=cv2.BORDER_CONSTANT,
+                borderValue=1,
+            )
+        return replace(masks, **arrays, method="farneback-alpha-v2")
 
     def _manual_and_safety(self, rgb, masks: MaskSet, reliable: bool) -> MaskSet:
         person, skin, water = masks.person.copy(), masks.skin.copy(), masks.water.copy()
         guidance = rgb @ np.array([0.2126, 0.7152, 0.0722], np.float32)
         warnings = list(masks.warnings)
-        maximum, minimum = rgb.max(axis=2), rgb.min(axis=2)
-        saturated = (maximum - minimum) / np.maximum(maximum, 1e-5) > 0.75
-        definite_non_skin = (maximum < 0.075) | saturated | (rgb[..., 2] > rgb[..., 0] * 1.85)
-        skin[definite_non_skin] = 0
+        if masks.skin_exclusion is not None:
+            skin[masks.skin_exclusion >= 0.5] = 0
         skin_confidence, person_confidence = masks.skin_confidence, masks.person_confidence
-        if skin_confidence < 0.8:
+        skin_source, skin_status = masks.skin_source, masks.skin_status
+        if not _skin_available(masks):
             skin *= 0
         if not reliable:
             skin *= 0
             skin_confidence = 0
+            skin_status = "needs-review"
             warnings.append(
                 "Отслеживание кожи неуверенно: автоматическая коррекция временно отключена."
             )
@@ -529,7 +553,10 @@ class TemporalMaskTracker:
             skin *= person
             person_confidence = 0.9
         person = _apply_strokes(person, self.edits, "person", guidance, self.feather)
+        skin *= person
         skin = _apply_strokes(skin, self.edits, "skin", guidance, self.feather)
+        if any(stroke.target == "skin" for stroke in self.edits.strokes):
+            skin_source, skin_status = "manual", "manual"
         if any(
             stroke.target == "skin" and stroke.operation == "add" for stroke in self.edits.strokes
         ):
@@ -544,15 +571,18 @@ class TemporalMaskTracker:
             warnings.append(
                 "Ручные видеомаски фиксированы в координатах кадра; проверьте движение объектов."
             )
-        return MaskSet(
-            person,
-            skin,
-            water,
-            underwater,
-            skin_confidence,
-            person_confidence,
-            tuple(dict.fromkeys(warnings)),
-            "farneback-alpha-v1",
+        return replace(
+            masks,
+            person=person,
+            skin=skin,
+            water=water,
+            underwater=underwater,
+            skin_confidence=skin_confidence,
+            person_confidence=person_confidence,
+            warnings=tuple(dict.fromkeys(warnings)),
+            method="farneback-alpha-v2",
+            skin_source=skin_source,
+            skin_status=skin_status,
         )
 
     def update(
@@ -581,7 +611,7 @@ class TemporalMaskTracker:
         )
         reliable = True
         if reset:
-            self._target = self._refresh(proxy, timestamp, fresh_masks)
+            self._target = self._refresh(proxy, timestamp, fresh_masks, rgb)
             self._state = _resize_masks(self._target, (proxy.shape[1], proxy.shape[0]))
             self.resets += 1
         else:
@@ -592,6 +622,9 @@ class TemporalMaskTracker:
                 flow = cv2.calcOpticalFlowFarneback(
                     gray, self._gray, None, 0.5, 3, 21, 3, 5, 1.1, 0
                 )
+                forward = cv2.calcOpticalFlowFarneback(
+                    self._gray, gray, None, 0.5, 3, 21, 3, 5, 1.1, 0
+                )
                 yy, xx = np.mgrid[: gray.shape[0], : gray.shape[1]].astype(np.float32)
                 map_x, map_y = xx + flow[..., 0], yy + flow[..., 1]
                 self._state = self._warp(self._state, map_x, map_y)
@@ -599,47 +632,101 @@ class TemporalMaskTracker:
                 previous_gray = cv2.remap(
                     self._gray, map_x, map_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE
                 )
+                previous_rgb = cv2.remap(
+                    self._rgb, map_x, map_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE
+                )
+                reverse = cv2.remap(
+                    forward, map_x, map_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT
+                )
                 residual = np.abs(gray.astype(np.float32) - previous_gray) / 255
+                color_residual = np.max(np.abs(proxy - previous_rgb), axis=2)
+                distance = np.linalg.norm(flow, axis=2)
+                consistent = np.linalg.norm(flow + reverse, axis=2) < 1.5 + distance * 0.05
+                in_bounds = (
+                    (map_x >= 0)
+                    & (map_y >= 0)
+                    & (map_x <= gray.shape[1] - 1)
+                    & (map_y <= gray.shape[0] - 1)
+                )
+                skin_region = self._state.skin > 0.1
+                invalid_skin = (color_residual >= 0.13) | ~consistent | ~in_bounds
+                # Local rejection catches a mask/hair occluder even when it covers only a
+                # small part of a large person and cannot affect global residual percentiles.
+                if np.any(skin_region & invalid_skin):
+                    self.skin_rejections += 1
+                    for masks in (self._state, self._target):
+                        masks.skin[invalid_skin] = 0
                 region = self._state.person > 0.2
                 error = float(np.percentile(residual[region] if np.any(region) else residual, 80))
+                skin_error = float(np.mean(invalid_skin[skin_region])) if np.any(skin_region) else 0
                 reliable = (
                     error < 0.13
-                    and float(np.percentile(np.linalg.norm(flow, axis=2), 95))
-                    < min(gray.shape) * 0.25
+                    and skin_error < 0.25
+                    and float(np.percentile(distance, 95)) < min(gray.shape) * 0.25
                 )
             except cv2.error:
                 reliable = False
             if not reliable:
                 self.flow_failures += 1
+                # Do not let a later good flow resurrect alpha from an unobserved interval.
+                self._state = replace(
+                    self._state,
+                    skin=np.zeros_like(self._state.skin),
+                    skin_status="needs-review",
+                    skin_confidence=0,
+                )
+                self._target = replace(
+                    self._target,
+                    skin=np.zeros_like(self._target.skin),
+                    skin_status="needs-review",
+                    skin_confidence=0,
+                )
             periodic = timestamp - self._last_refresh >= self.refresh_seconds - 1e-6
             recovery = not reliable and timestamp - self._last_refresh >= 0.25
             if periodic or recovery or fresh_masks is not None:
-                self._target = self._refresh(proxy, timestamp, fresh_masks)
+                self._target = self._refresh(proxy, timestamp, fresh_masks, rgb)
             self._state = _blend_masks(self._state, self._target, 1 - exp(-dt / 0.18))
         self._gray = gray.copy()
+        self._rgb = proxy.copy()
         self._last_time, self._shot_id, self._source_shape = timestamp, shot_id, rgb.shape[:2]
         self.frames += 1
         full = _resize_masks(self._state, (rgb.shape[1], rgb.shape[0]))
-        return self._manual_and_safety(rgb, full, reliable)
+        result = self._manual_and_safety(rgb, full, reliable)
+        self._last_skin_metadata = {
+            "skin_source": result.skin_source,
+            "skin_status": result.skin_status,
+            "skin_model_sha256": result.skin_model_sha256,
+            "skin_diagnostics": result.skin_diagnostics,
+        }
+        self.skin_status_frames[result.skin_status] += 1
+        return result
 
     @property
     def retained_bytes(self) -> int:
         total = self._gray.nbytes if self._gray is not None else 0
+        total += self._rgb.nbytes if self._rgb is not None else 0
         for masks in (self._state, self._target):
             if masks is not None:
                 total += sum(
                     getattr(masks, key).nbytes for key in ("person", "skin", "water", "underwater")
                 )
+                if masks.skin_exclusion is not None:
+                    total += masks.skin_exclusion.nbytes
         return total
 
     def to_metadata(self) -> dict:
-        return {
-            "method": "farneback-alpha-v1",
+        metadata = {
+            "method": "farneback-alpha-v2",
             "frames": self.frames,
             "semantic_refreshes": self.model_calls,
             "resets": self.resets,
             "flow_failures": self.flow_failures,
+            "skin_rejections": self.skin_rejections,
+            "refresh_seconds": self.refresh_seconds,
             "proxy_edge": self.proxy_edge,
             "retained_bytes": self.retained_bytes,
             "manual_edits": "static-normalized-frame-coordinates",
+            "skin_status_frames": self.skin_status_frames.copy(),
         }
+        metadata.update(self._last_skin_metadata)
+        return metadata

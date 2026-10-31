@@ -13,7 +13,8 @@ analysis = Analysis(
     [str(root / "packaging" / "launcher.py")],
     pathex=[str(root / "src")],
     binaries=[], datas=data, hiddenimports=[],
-    excludes=["tkinter", "matplotlib", "pytest", "PySide6.QtWebEngineCore", "PySide6.QtQml",
+    excludes=["tkinter", "matplotlib", "pytest", "tensorflow", "tf2onnx", "mediapipe", "onnx",
+              "PySide6.QtWebEngineCore", "PySide6.QtQml",
               "PySide6.QtQuick", "PySide6.QtTest"],
     noarchive=False,
 )
