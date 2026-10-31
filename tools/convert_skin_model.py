@@ -10,9 +10,11 @@ Pass --download explicitly to acquire the source, or supply a local verified fil
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import os
+import struct
 import subprocess
 import sys
 import tempfile
@@ -70,6 +72,208 @@ def check_environment() -> None:
         raise ValueError(f"Conversion dependencies differ from pinned versions: {actual}")
 
 
+def read_normalization(source: Path) -> dict:
+    """Read the authoritative NormalizationOptions from the official TFLite bytes.
+
+    TFLite and metadata use separate FlatBuffer roots. Reading only these documented
+    schema fields avoids importing the MediaPipe framework or assuming a model card's
+    normalization. The source checksum is verified before any metadata is interpreted.
+    """
+    from flatbuffers.table import Table
+
+    verify_source(source)
+    data = source.read_bytes()
+
+    def integer(buffer, offset):
+        return struct.unpack_from("<I", buffer, offset)[0]
+
+    def children(table, field):
+        offset = table.Offset(4 + 2 * field)
+        if not offset:
+            return []
+        start = table.Vector(offset)
+        return [
+            Table(table.Bytes, start + index * 4 + integer(table.Bytes, start + index * 4))
+            for index in range(table.VectorLen(offset))
+        ]
+
+    def text(table, field):
+        offset = table.Offset(4 + 2 * field)
+        return table.String(table.Pos + offset).decode("utf-8") if offset else None
+
+    def floats(table, field):
+        offset = table.Offset(4 + 2 * field)
+        return (
+            list(
+                struct.unpack_from(
+                    "<" + "f" * table.VectorLen(offset), table.Bytes, table.Vector(offset)
+                )
+            )
+            if offset
+            else []
+        )
+
+    model = Table(data, integer(data, 0))
+    buffers = children(model, 4)
+    metadata = next(row for row in children(model, 6) if text(row, 0) == "TFLITE_METADATA")
+    index = integer(data, metadata.Pos + metadata.Offset(6))
+    offset = buffers[index].Offset(4)
+    begin, length = buffers[index].Vector(offset), buffers[index].VectorLen(offset)
+    metadata_bytes = bytes(data[begin : begin + length])
+    description = Table(metadata_bytes, integer(metadata_bytes, 0))
+    tensor = children(children(description, 3)[0], 2)[0]
+    for process in children(tensor, 4):
+        # ProcessUnitOptions enum: 1 is NormalizationOptions.
+        type_offset = process.Offset(4)
+        if not type_offset or process.Bytes[process.Pos + type_offset] != 1:
+            continue
+        option_offset = process.Pos + process.Offset(6)
+        options = Table(process.Bytes, option_offset + integer(process.Bytes, option_offset))
+        result = {
+            "input_name": text(tensor, 0),
+            "mean": floats(options, 0),
+            "std": floats(options, 1),
+            "metadata_sha256": hashlib.sha256(metadata_bytes).hexdigest(),
+        }
+        if result["mean"] != [127.5] or result["std"] != [127.5]:
+            raise ValueError(f"Official model has unexpected normalization: {result}")
+        return result
+    raise ValueError("Official model has no NormalizationOptions metadata")
+
+
+def canonicalize_model(path: Path) -> None:
+    """Give an equivalent inference DAG stable names, order and protobuf bytes.
+
+    tf2onnx's optimiser generates different internal identifiers/order on repeated
+    runs. Content-addressing deterministic operators and constants removes that
+    incidental variation. Public tensor names, values and output shapes stay fixed;
+    identical pure operations/constants are shared. Numerical parity is checked on
+    the resulting bytes, not only on the raw converter output.
+    """
+    import onnx
+    from onnx import helper
+
+    model = onnx.load(path)
+    graph = model.graph
+    if graph.sparse_initializer or model.functions or model.training_info:
+        raise ValueError("Unexpected non-dense inference model; canonicalisation is not defined")
+    public_inputs = {value.name for value in graph.input}
+    public_outputs = [value.name for value in graph.output]
+    names = {key: key for key in public_inputs}
+    initializers = {}
+    for original in graph.initializer:
+        tensor = copy.deepcopy(original)
+        tensor.name = ""
+        tensor.doc_string = ""
+        digest = hashlib.sha256(tensor.SerializeToString(deterministic=True)).hexdigest()
+        name = "constant_" + digest
+        names[original.name] = name
+        tensor.name = name
+        initializers[name] = tensor
+
+    def normalized_node(original):
+        node = copy.deepcopy(original)
+        node.name = ""
+        node.doc_string = ""
+        del node.input[:]
+        node.input.extend(names.get(name, name) for name in original.input)
+        del node.output[:]
+        node.output.extend(f"output_{index}" for index in range(len(original.output)))
+        attributes = sorted(node.attribute, key=lambda item: item.name)
+        del node.attribute[:]
+        for attribute in attributes:
+            if attribute.type in (onnx.AttributeProto.GRAPH, onnx.AttributeProto.GRAPHS):
+                raise ValueError("Unexpected control-flow subgraph in fixed skin model")
+            if attribute.type == onnx.AttributeProto.TENSOR:
+                attribute.t.name = ""
+                attribute.t.doc_string = ""
+            if attribute.type == onnx.AttributeProto.TENSORS:
+                for tensor in attribute.tensors:
+                    tensor.name = ""
+                    tensor.doc_string = ""
+            node.attribute.append(attribute)
+        return node
+
+    pending = list(graph.node)
+    nodes, seen = [], set()
+    while pending:
+        ready = [
+            node for node in pending if all(not value or value in names for value in node.input)
+        ]
+        if not ready:
+            raise ValueError("Inference graph is cyclic or has an unresolved tensor")
+        ranked = []
+        for original in ready:
+            if original.op_type.startswith("Random") or original.op_type in (
+                "Bernoulli",
+                "Dropout",
+            ):
+                raise ValueError("Stochastic operators must not be coalesced")
+            node = normalized_node(original)
+            key = node.SerializeToString(deterministic=True)
+            ranked.append((key, original, node))
+        for key, original, node in sorted(ranked, key=lambda row: row[0]):
+            if (
+                node.op_type == "Identity"
+                and not node.domain
+                and not node.attribute
+                and len(original.input) == len(original.output) == 1
+            ):
+                names[original.output[0]] = names[original.input[0]]
+                continue
+            digest = hashlib.sha256(key).hexdigest()
+            outputs = [f"value_{digest}_{index}" for index in range(len(original.output))]
+            for previous, stable in zip(original.output, outputs, strict=True):
+                names[previous] = stable
+            if digest not in seen:
+                node.name = "node_" + digest
+                del node.output[:]
+                node.output.extend(outputs)
+                nodes.append(node)
+                seen.add(digest)
+        ready_ids = {id(node) for node in ready}
+        pending = [node for node in pending if id(node) not in ready_ids]
+    for index, name in enumerate(public_outputs):
+        nodes.append(
+            helper.make_node("Identity", [names[name]], [name], name=f"public_output_{index}")
+        )
+
+    information = {}
+    for original in graph.value_info:
+        if (
+            original.name not in names
+            or original.name in public_inputs
+            or original.name in public_outputs
+        ):
+            continue
+        value = copy.deepcopy(original)
+        value.name = names[original.name]
+        value.doc_string = ""
+        for axis, dimension in enumerate(value.type.tensor_type.shape.dim):
+            if dimension.HasField("dim_param"):
+                dimension.dim_param = f"unknown_dimension_{axis}"
+        previous = information.get(value.name)
+        if previous is None or value.SerializeToString(
+            deterministic=True
+        ) < previous.SerializeToString(deterministic=True):
+            information[value.name] = value
+    del graph.node[:]
+    graph.node.extend(nodes)
+    del graph.initializer[:]
+    graph.initializer.extend(initializers[name] for name in sorted(initializers))
+    del graph.value_info[:]
+    graph.value_info.extend(information[name] for name in sorted(information))
+    graph.name = "selfie_multiclass_v1"
+    graph.doc_string = ""
+    model.doc_string = ""
+    del model.metadata_props[:]
+    imports = sorted(model.opset_import, key=lambda item: (item.domain, item.version))
+    del model.opset_import[:]
+    model.opset_import.extend(imports)
+    onnx.checker.check_model(model)
+    path.write_bytes(model.SerializeToString(deterministic=True))
+
+
 def parity(source: Path, model: Path) -> dict:
     import numpy as np
     import onnxruntime as ort
@@ -83,19 +287,21 @@ def parity(source: Path, model: Path) -> dict:
     )
     reference = tf.lite.Interpreter(model_path=str(source), num_threads=2)
     reference.allocate_tensors()
+    normalization = read_normalization(source)
     input_info, output_info = reference.get_input_details()[0], reference.get_output_details()[0]
     rng = np.random.default_rng(31)
     samples = [
         np.zeros((1, 256, 256, 3), np.float32),
         np.ones((1, 256, 256, 3), np.float32),
-        rng.random((1, 256, 256, 3), dtype=np.float32),
+        -np.ones((1, 256, 256, 3), np.float32),
+        rng.random((1, 256, 256, 3), dtype=np.float32) * 2 - 1,
     ]
     bars = np.zeros((1, 256, 256, 3), np.float32)
     for index, rgb in enumerate(
         ((0.7, 0.5, 0.4), (0.1, 0.4, 0.5), (0.1, 0.1, 0.1), (0.8, 0.1, 0.1))
     ):
         bars[:, :, index * 64 : (index + 1) * 64] = rgb
-    samples.append(bars)
+    samples.append(bars * 2 - 1)
     rows = []
     for index, sample in enumerate(samples):
         reference.set_tensor(input_info["index"], sample)
@@ -117,8 +323,12 @@ def parity(source: Path, model: Path) -> dict:
             "name": session.get_inputs()[0].name,
             "shape": session.get_inputs()[0].shape,
             "dtype": "float32",
-            "normalization": "RGB [0,1] NHWC",
+            "normalization": "RGB [-1,1] NHWC; normalized_rgb = rgb_float_0_1 * 2 - 1",
+            "normalization_mean": normalization["mean"],
+            "normalization_std": normalization["std"],
+            "range": [-1, 1],
         },
+        "source_normalization_metadata": normalization,
         "output": {
             "name": session.get_outputs()[0].name,
             "shape": session.get_outputs()[0].shape,
@@ -158,6 +368,7 @@ def convert(source: Path, output: Path) -> dict:
             env=environment,
             check=True,
         )
+        canonicalize_model(temporary)
         evidence = parity(source, temporary)
         digest = sha256(temporary)
         if ONNX_SHA256 != "TO_BE_VERIFIED" and digest != ONNX_SHA256:
@@ -184,6 +395,7 @@ def convert(source: Path, output: Path) -> dict:
             "dependencies": VERSIONS,
             "opset": 17,
             "tool": "tools/convert_skin_model.py",
+            "canonicalization": "content-addressed-inference-dag-v1",
         },
         "runtime": (
             "ONNX Runtime 1.23.2 CPU; bundled weights; telemetry disabled; no runtime downloads"
