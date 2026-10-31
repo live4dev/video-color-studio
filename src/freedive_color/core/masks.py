@@ -4,6 +4,7 @@ PPHumanSeg locates people; SelfieMulticlass separately identifies visible skin a
 excludes hair/clothes/accessories. Both models are bundled and run locally on CPU.
 """
 
+import copy
 import hashlib
 from dataclasses import asdict, dataclass, field
 from math import isfinite
@@ -15,7 +16,7 @@ import numpy as np
 
 from .analyze import validate_rgb
 from .errors import StudioError
-from .skin import SKIN_MODEL_ID, SkinPrediction, infer_skin
+from .skin import SkinPrediction, infer_skin
 
 MODEL_NAME = "human_segmentation_pphumanseg_2023mar.onnx"
 MODEL_SHA256 = "552d8a984054e59b5d773d24b9b12022b22046ceb2bbc4c9aaeaceb36a9ddf24"
@@ -143,6 +144,8 @@ class MaskSet:
     skin_model_sha256: str | None = None
     skin_diagnostics: dict = field(default_factory=dict)
     skin_exclusion: np.ndarray | None = None
+    skin_algorithm_version: str = "legacy"
+    skin_models: tuple[dict, ...] = ()
 
     def to_metadata(self) -> dict:
         return {
@@ -152,6 +155,8 @@ class MaskSet:
             "skin_source": self.skin_source,
             "skin_status": self.skin_status,
             "skin_model_sha256": self.skin_model_sha256,
+            "skin_algorithm_version": self.skin_algorithm_version,
+            "skin_models": copy.deepcopy(list(self.skin_models)),
             "skin_diagnostics": self.skin_diagnostics.copy(),
             "warnings": list(self.warnings),
             "coverage": {
@@ -384,6 +389,7 @@ def build_masks(
     skin_confidence = 0.0
     skin_source, skin_status = "none", "needs-review"
     skin_model_sha256, skin_diagnostics = None, {}
+    skin_algorithm_version, skin_models = "legacy", ()
     exclusion = np.zeros(shape, np.float32)
     if skin_prediction is None and use_model:
         try:
@@ -394,7 +400,11 @@ def build_masks(
         if not isinstance(skin_prediction, SkinPrediction):
             raise StudioError("Некорректный результат семантической модели кожи.")
         skin_prediction.validate(shape)
-        skin_source = SKIN_MODEL_ID
+        skin_source = skin_prediction.model_id
+        skin_algorithm_version = skin_prediction.algorithm_version
+        skin_models = skin_prediction.models or (
+            {"id": skin_source, "sha256": skin_prediction.model_sha256},
+        )
         skin_model_sha256 = skin_prediction.model_sha256
         skin_diagnostics = skin_prediction.diagnostics.copy()
         exclusion = skin_prediction.exclusion.astype(np.float32)
@@ -417,8 +427,9 @@ def build_masks(
                 person_confidence, float(np.median(semantic_person[semantic_certain]))
             )
         accepted = (probability >= 0.65) & (probability - exclusion >= 0.55)
-        accepted &= semantic_person >= 0.7
-        accepted &= person >= 0.5
+        accepted &= (semantic_person >= 0.7) & (person >= 0.5)
+        if skin_prediction.consensus is not None:
+            accepted &= skin_prediction.consensus >= 0.999
         selected = probability[accepted]
         ambiguous = (probability >= 0.5) & (semantic_person >= 0.7) & (person >= 0.5) & ~accepted
         skin_confidence = float(np.median(selected)) if selected.size else 0.0
@@ -430,31 +441,63 @@ def build_masks(
             minimum_semantic_margin=0.55,
             automatic_accepted=False,
         )
-        if (
-            skin_confidence >= 0.8
-            and max(8, probability.size * 0.00005) <= selected.size < probability.size * 0.85
-        ):
-            alpha = np.clip((probability - 0.45) / 0.4, 0, 1) * accepted
+        reliable = np.zeros(shape, bool)
+        count, labels, stats, _centers = cv2.connectedComponentsWithStats(accepted.astype(np.uint8))
+        accepted_count, rejected_count = 0, 0
+        reasons = {"low_score": 0, "too_small": 0, "overly_broad": 0, "ambiguous": 0}
+        # Preserve the old total-evidence floor independently of component noise.
+        # Scaling that whole-frame floor per limb deletes small, strongly confirmed
+        # hands/faces merely because the original photograph has more pixels.
+        minimum = max(8, probability.size * 0.00005)
+        insufficient_total = selected.size < minimum
+        broad = selected.size >= probability.size * 0.85
+        for index in range(1, count):
+            component = labels == index
+            if broad:
+                reasons["overly_broad"] += 1
+            elif insufficient_total or stats[index, cv2.CC_STAT_AREA] < 8:
+                reasons["too_small"] += 1
+            elif float(np.median(probability[component])) < 0.8:
+                reasons["low_score"] += 1
+            else:
+                reliable[component] = True
+                accepted_count += 1
+                continue
+            rejected_count += 1
+        # Ambiguous disconnected regions also count as partial abstention. They cannot
+        # erase a reliable hand/leg elsewhere, nor become alpha through edge filtering.
+        ambiguous_count = cv2.connectedComponents(ambiguous.astype(np.uint8))[0] - 1
+        reasons["ambiguous"] = ambiguous_count
+        rejected_count += ambiguous_count
+        skin_diagnostics.update(
+            accepted_components=accepted_count,
+            rejected_components=rejected_count,
+            rejection_reasons=reasons,
+        )
+        if accepted_count:
+            skin_confidence = float(np.median(probability[reliable]))
+            skin_diagnostics["semantic_score"] = skin_confidence
+            alpha = np.clip((probability - 0.45) / 0.4, 0, 1) * reliable
             skin = _feather(alpha.astype(np.float32), guidance, feather * 0.5)
-            # Hard exclusions after edge filtering prevent warm hair/equipment leakage.
-            skin *= accepted & (exclusion < 0.5)
-            skin_status = "automatic"
+            skin *= reliable & (exclusion < 0.5)
+            skin_status = "needs-review" if rejected_count else "automatic"
             skin_diagnostics["automatic_accepted"] = True
             warnings = [
                 message
                 for message in warnings
                 if not message.startswith("Человек не выделен уверенно")
             ]
-            if np.count_nonzero(ambiguous) > max(16, selected.size * 0.2):
+            if rejected_count:
                 warnings.append(
-                    "Неоднозначные участки кожи исключены из автокоррекции. Проверьте маску."
+                    "Неоднозначные участки кожи исключены из автокоррекции. "
+                    "Уверенные участки обрабатываются; проверьте маску."
                 )
-    if skin_status != "automatic":
+    if not skin_diagnostics.get("automatic_accepted"):
         warnings.append(
             "Маска кожи требует проверки: автоматическая коррекция отключена. Добавьте кожу кистью."
         )
-    elif skin_source == SKIN_MODEL_ID:
-        method += "+selfie-multiclass-v1"
+    elif skin_source != "none":
+        method += "+" + skin_source
     skin = _apply_strokes(skin, edits, "skin", guidance, feather)
     if any(stroke.target == "skin" for stroke in edits.strokes):
         skin_source, skin_status = "manual", "manual"
@@ -497,4 +540,6 @@ def build_masks(
         skin_model_sha256=skin_model_sha256,
         skin_diagnostics=skin_diagnostics,
         skin_exclusion=exclusion,
+        skin_algorithm_version=skin_algorithm_version,
+        skin_models=skin_models,
     )

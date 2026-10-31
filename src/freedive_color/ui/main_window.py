@@ -1048,8 +1048,17 @@ class MainWindow(ControllerWindowMixin, QMainWindow):
                 "needs-review": _("требует проверки"),
                 "manual": _("ручная"),
             }.get(masks.skin_status, _("требует проверки"))
+            details = list(masks.warnings)
+            if (
+                masks.skin_status == "needs-review"
+                and getattr(masks, "skin_diagnostics", {}).get("automatic_accepted") is True
+                and getattr(masks, "skin_diagnostics", {}).get("accepted_components", 0) > 0
+                and getattr(masks, "skin", None) is not None
+                and bool((masks.skin > 0).any())
+            ):
+                details.insert(0, _("Уверенные участки кожи обрабатываются; остальные исключены."))
             self.local_controls.confidence_label.setText(
-                _("Маска кожи: ") + status + "\n" + "\n".join(masks.warnings)
+                _("Маска кожи: ") + status + "\n" + "\n".join(details)
             )
 
     def apply_to_selected(self) -> None:

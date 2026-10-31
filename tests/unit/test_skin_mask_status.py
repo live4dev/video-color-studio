@@ -72,3 +72,28 @@ def test_underwater_clipping_keeps_semantic_provenance_and_exclusions():
     assert result.masks.skin_diagnostics == diagnostics
     np.testing.assert_array_equal(result.masks.skin_exclusion, exclusion)
     np.testing.assert_array_equal(masks.skin, ones)
+
+
+@pytest.mark.parametrize("accepted,nonempty", [(True, True), (False, True), (True, False)])
+def test_ui_explains_only_trusted_nonempty_partial_skin(accepted, nonempty):
+    from freedive_color.ui.main_window import MainWindow
+
+    labels = []
+    masks = SimpleNamespace(
+        skin_status="needs-review",
+        skin=np.ones((2, 2), np.float32) if nonempty else np.zeros((2, 2), np.float32),
+        skin_diagnostics={"automatic_accepted": accepted, "accepted_components": 1},
+        warnings=("Проверьте границы",),
+    )
+    window = SimpleNamespace(
+        local_controls=SimpleNamespace(
+            overlay_combo=SimpleNamespace(currentData=lambda: "none"),
+            confidence_label=SimpleNamespace(setText=labels.append),
+        ),
+        preview=SimpleNamespace(masks=masks),
+        viewer=SimpleNamespace(set_mask_overlay=lambda *_args: None),
+    )
+    MainWindow._update_mask_overlay(window)
+    assert labels[0].startswith("Маска кожи: требует проверки\n")
+    assert ("Уверенные участки кожи обрабатываются" in labels[0]) == (accepted and nonempty)
+    assert "%" not in labels[0]

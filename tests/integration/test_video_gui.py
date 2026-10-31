@@ -246,8 +246,9 @@ def test_video_selection_cannot_replace_a_later_photo(window, qtbot, video_fixtu
     assert not window._video_playing
 
 
+@pytest.mark.parametrize("partial", [False, True])
 def test_gui_passes_tracked_masks_and_reuses_raw_alpha_only_for_color_changes(
-    window, qtbot, video_fixtures, monkeypatch
+    window, qtbot, video_fixtures, monkeypatch, partial
 ):
     from freedive_color.core import video_pipeline
     from freedive_color.ui import main_window as ui
@@ -265,7 +266,12 @@ def test_gui_passes_tracked_masks_and_reuses_raw_alpha_only_for_color_changes(
             0.95,
             0.95,
             skin_source="selfie-multiclass-v1",
-            skin_status="automatic",
+            skin_status="needs-review" if partial else "automatic",
+            skin_diagnostics={
+                "automatic_accepted": True,
+                "accepted_components": 1,
+                "rejected_components": int(partial),
+            },
         )
 
     monkeypatch.setattr("freedive_color.core.temporal.build_masks", semantic)
@@ -286,6 +292,10 @@ def test_gui_passes_tracked_masks_and_reuses_raw_alpha_only_for_color_changes(
     assert len(calls) == 1
     assert window.preview.video_masks is calls[-1][1].masks is render_masks[-1]
     assert window._video_plan is calls[-1][1].plan
+    assert np.any(window.preview.masks.skin > 0)
+    assert (
+        "Уверенные участки кожи обрабатываются" in window.local_controls.confidence_label.text()
+    ) == partial
 
     # A soft waterline is applied during rendering, never accumulated in cached alpha.
     edits = MaskEdits(waterline=((0, 0.5), (1, 0.5)))

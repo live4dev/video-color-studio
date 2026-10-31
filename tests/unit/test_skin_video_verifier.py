@@ -71,8 +71,9 @@ def test_target_overrides_are_explicit_and_finite(tmp_path):
 
 
 def test_decimal_time_rounding_does_not_skip_the_exact_source_frame():
-    exact = Fraction(541, 30)
-    assert verifier.reached_sample(exact, Fraction(0), 18.033333333333335)
+    exact = Fraction(257, 24)  # unrelated synthetic 24 fps clock
+    assert Fraction(str(float(exact))) > exact  # decimal rounding is above the true PTS
+    assert verifier.reached_sample(exact, Fraction(0), float(exact))
     assert not verifier.reached_sample(exact - Fraction(1, 600), Fraction(0), float(exact))
     assert verifier.reached_sample(exact + 2, Fraction(2), float(exact))
 

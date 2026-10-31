@@ -411,8 +411,15 @@ def _resize_masks(masks: MaskSet, size: tuple[int, int]) -> MaskSet:
 
 
 def _skin_available(masks: MaskSet) -> bool:
+    # Display status describes completeness, not whether every observed skin region
+    # is unusable. A partial semantic result explicitly records accepted components.
+    partial = (
+        masks.skin_status == "needs-review"
+        and masks.skin_diagnostics.get("automatic_accepted") is True
+        and masks.skin_diagnostics.get("accepted_components", 0) > 0
+    )
     return (
-        masks.skin_status in ("automatic", "manual")
+        (masks.skin_status in ("automatic", "manual") or partial)
         and masks.skin_confidence > 0
         and bool(np.any(masks.skin > 0))
     )
@@ -427,6 +434,10 @@ def _blend_masks(before: MaskSet, after: MaskSet, amount: float) -> MaskSet:
     # Positive alpha changes remain smoothed; confidently negative classes act immediately.
     if not _skin_available(after):
         arrays["skin"] = np.zeros_like(after.skin)
+    else:
+        # A fresh observation may reject one component while accepting another.
+        # Never fade the old rejected component through a new piece of clothing.
+        arrays["skin"][after.skin <= 0] = 0
     if after.skin_exclusion is not None:
         arrays["skin"][after.skin_exclusion >= 0.5] = 0
     return replace(after, **arrays, method="farneback-alpha-v2")
@@ -476,6 +487,8 @@ class TemporalMaskTracker:
         self.resets = 0
         self.flow_failures = 0
         self.skin_rejections = 0
+        self.skin_component_rejections = 0
+        self.partial_skin_frames = 0
         self._last_skin_metadata = {}
         self.skin_status_frames = {"automatic": 0, "needs-review": 0, "manual": 0}
 
@@ -585,6 +598,60 @@ class TemporalMaskTracker:
             skin_status=skin_status,
         )
 
+    def _reject_local_skin_flow(self, invalid: np.ndarray) -> int:
+        """Invalidate occluded skin components without deleting unrelated limbs.
+
+        A small occluder clears only its covered pixels; a component with at least
+        one quarter unreliable pixels cannot leave a misleading remnant. Source RGB
+        is never changed.
+        The same erasure applies to the smoothed state and semantic target, so old
+        alpha cannot be resurrected on a later frame.
+        """
+        # A newly observed component may still be fading into the smoothed state.
+        # Validate the semantic target too, or an occluded low-alpha component can
+        # survive here and grow back from its old high-alpha target on later frames.
+        region = (self._state.skin > 0.1) | (self._target.skin > 0.1)
+        if not np.any(region & invalid):
+            return int(bool(np.any(region)))
+        self.skin_rejections += 1
+        count, labels = cv2.connectedComponents(region.astype(np.uint8))
+        sizes = np.bincount(labels.ravel(), minlength=count)
+        invalid_sizes = np.bincount(labels[invalid], minlength=count)
+        rejected_labels = invalid_sizes >= sizes * 0.25
+        rejected_labels[0] = False
+        erased = invalid | rejected_labels[labels]
+        rejected = int(np.count_nonzero(rejected_labels))
+        retained = count - 1 - rejected
+        self.skin_component_rejections += rejected
+        for key in ("_state", "_target"):
+            masks = getattr(self, key)
+            skin = masks.skin.copy()
+            skin[erased] = 0
+            available = bool(np.any(skin > 0.1))
+            diagnostics = masks.skin_diagnostics.copy()
+            diagnostics.update(
+                automatic_accepted=available,
+                accepted_components=retained if available else 0,
+                tracked_accepted_components=retained if available else 0,
+                temporal_rejected_components=diagnostics.get("temporal_rejected_components", 0)
+                + rejected,
+            )
+            warnings = list(masks.warnings)
+            warnings.append("Отслеживание части кожи неуверенно: недостоверные участки отключены.")
+            setattr(
+                self,
+                key,
+                replace(
+                    masks,
+                    skin=skin,
+                    skin_status="needs-review",
+                    skin_confidence=masks.skin_confidence if available else 0,
+                    skin_diagnostics=diagnostics,
+                    warnings=tuple(dict.fromkeys(warnings)),
+                ),
+            )
+        return retained
+
     def update(
         self,
         rgb: np.ndarray,
@@ -648,39 +715,40 @@ class TemporalMaskTracker:
                     & (map_x <= gray.shape[1] - 1)
                     & (map_y <= gray.shape[0] - 1)
                 )
-                skin_region = self._state.skin > 0.1
                 invalid_skin = (color_residual >= 0.13) | ~consistent | ~in_bounds
                 # Local rejection catches a mask/hair occluder even when it covers only a
                 # small part of a large person and cannot affect global residual percentiles.
-                if np.any(skin_region & invalid_skin):
-                    self.skin_rejections += 1
-                    for masks in (self._state, self._target):
-                        masks.skin[invalid_skin] = 0
+                retained_skin_components = self._reject_local_skin_flow(invalid_skin)
                 region = self._state.person > 0.2
                 error = float(np.percentile(residual[region] if np.any(region) else residual, 80))
-                skin_error = float(np.mean(invalid_skin[skin_region])) if np.any(skin_region) else 0
-                reliable = (
-                    error < 0.13
-                    and skin_error < 0.25
-                    and float(np.percentile(distance, 95)) < min(gray.shape) * 0.25
-                )
+                reliable = (error < 0.13 or retained_skin_components > 0) and float(
+                    np.percentile(distance, 95)
+                ) < min(gray.shape) * 0.25
             except cv2.error:
                 reliable = False
             if not reliable:
                 self.flow_failures += 1
                 # Do not let a later good flow resurrect alpha from an unobserved interval.
-                self._state = replace(
-                    self._state,
-                    skin=np.zeros_like(self._state.skin),
-                    skin_status="needs-review",
-                    skin_confidence=0,
-                )
-                self._target = replace(
-                    self._target,
-                    skin=np.zeros_like(self._target.skin),
-                    skin_status="needs-review",
-                    skin_confidence=0,
-                )
+                for key in ("_state", "_target"):
+                    masks = getattr(self, key)
+                    diagnostics = masks.skin_diagnostics.copy()
+                    diagnostics.update(
+                        automatic_accepted=False,
+                        accepted_components=0,
+                        tracked_accepted_components=0,
+                        temporal_abstention_reason="unreliable-flow",
+                    )
+                    setattr(
+                        self,
+                        key,
+                        replace(
+                            masks,
+                            skin=np.zeros_like(masks.skin),
+                            skin_status="needs-review",
+                            skin_confidence=0,
+                            skin_diagnostics=diagnostics,
+                        ),
+                    )
             periodic = timestamp - self._last_refresh >= self.refresh_seconds - 1e-6
             recovery = not reliable and timestamp - self._last_refresh >= 0.25
             if periodic or recovery or fresh_masks is not None:
@@ -697,8 +765,12 @@ class TemporalMaskTracker:
             "skin_status": result.skin_status,
             "skin_model_sha256": result.skin_model_sha256,
             "skin_diagnostics": result.skin_diagnostics,
+            "skin_algorithm_version": getattr(result, "skin_algorithm_version", "legacy"),
+            "skin_models": [dict(model) for model in getattr(result, "skin_models", ())],
         }
         self.skin_status_frames[result.skin_status] += 1
+        if result.skin_status == "needs-review" and _skin_available(result):
+            self.partial_skin_frames += 1
         return result
 
     @property
@@ -722,6 +794,8 @@ class TemporalMaskTracker:
             "resets": self.resets,
             "flow_failures": self.flow_failures,
             "skin_rejections": self.skin_rejections,
+            "skin_component_rejections": self.skin_component_rejections,
+            "partial_skin_frames": self.partial_skin_frames,
             "refresh_seconds": self.refresh_seconds,
             "proxy_edge": self.proxy_edge,
             "retained_bytes": self.retained_bytes,

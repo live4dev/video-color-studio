@@ -242,6 +242,7 @@ def evaluate_video(
         "source": str(source),
         "source_sha256": source_sha,
         "source_sha256_after": source_after,
+        "sample_manifest_sha256": sha256_file(samples_path),
         "source_unchanged": True,
         "width": info.width,
         "height": info.height,
