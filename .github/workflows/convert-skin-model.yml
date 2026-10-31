@@ -1,0 +1,51 @@
+name: Reproduce offline skin model
+on:
+  push:
+    branches: [codex/semantic-skin]
+    paths:
+      - tools/convert_skin_model.py
+      - .github/workflows/convert-skin-model.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  convert:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    env:
+      TF_CPP_MIN_LOG_LEVEL: '2'
+      TF_NUM_INTEROP_THREADS: '2'
+      TF_NUM_INTRAOP_THREADS: '2'
+      CUDA_VISIBLE_DEVICES: '-1'
+      PYTHONHASHSEED: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install pinned developer-only conversion tools
+        run: >-
+          python -m pip install tensorflow==2.15.1 tf2onnx==1.16.1 numpy==1.26.4
+          onnx==1.17.0 onnxruntime==1.23.2 protobuf==3.20.3
+      - name: Convert verified official weights and compare with TFLite
+        run: >-
+          python tools/convert_skin_model.py
+          --source build/skin-model/source.tflite --download
+          --output build/skin-model/selfie_multiclass_256x256.onnx
+          --report build/skin-model/SELFIE_MULTICLASS_METADATA.json
+      - name: Repeat conversion independently and require identical bytes
+        run: |
+          python tools/convert_skin_model.py --source build/skin-model/source.tflite \
+            --output build/skin-repeat/selfie_multiclass_256x256.onnx \
+            --report build/skin-model/repeated-conversion.json
+          cmp build/skin-model/selfie_multiclass_256x256.onnx build/skin-repeat/selfie_multiclass_256x256.onnx
+          sha256sum build/skin-model/selfie_multiclass_256x256.onnx > build/skin-model/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-selfie-multiclass
+          retention-days: 7
+          path: |
+            build/skin-model/selfie_multiclass_256x256.onnx
+            build/skin-model/SELFIE_MULTICLASS_METADATA.json
+            build/skin-model/repeated-conversion.json
+            build/skin-model/SHA256SUMS.txt
