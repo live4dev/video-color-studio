@@ -75,6 +75,13 @@ def main() -> None:
     assert record["passed"] and record["source_unchanged"]
     masks = record["output"]["masks"]
     assert "pphumanseg" in masks["method"] and masks["coverage"]["person"] > 0
+    skin_model = json.loads(
+        (ROOT / "src/freedive_color/assets/models/SELFIE_MULTICLASS_METADATA.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert masks["skin_source"] == skin_model["model_id"]
+    assert masks["skin_model_sha256"] == skin_model["onnx_sha256"]
 
     from generate_video_fixtures import generate
     from render_video_evidence import inspect_video, verify_full_export
@@ -98,6 +105,8 @@ def main() -> None:
     subprocess.run(video_command, cwd=ROOT.parent, env=environment, check=True, timeout=90)
     video_record = json.loads((video_directory / "video_smoke.json").read_text(encoding="utf-8"))
     assert video_record["passed"] and video_record["source_unchanged"]
+    assert video_record["skin_model_present"]
+    assert video_record["masks"]["skin_model_sha256"] == skin_model["onnx_sha256"]
     assert video_record["playback_frame_count"] >= 3
     verification = verify_full_export(
         inspect_video(fixtures["vfr_offset"]), inspect_video(Path(video_record["output_path"]))
@@ -111,6 +120,7 @@ def main() -> None:
                 "evidence": str(output),
                 "passed": True,
                 "photo_model_verified": True,
+                "skin_model_sha256": skin_model["onnx_sha256"],
                 "video_gui_playback_and_export_verified": True,
                 "video_independent_audit": verification,
                 "network_denied": sys.platform == "darwin" and bool(shutil.which("sandbox-exec")),

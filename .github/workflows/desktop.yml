@@ -32,6 +32,14 @@ jobs:
       - name: Build image-only OpenCV for macOS
         if: runner.os == 'macOS'
         run: uv run --no-sync python tools/build_image_opencv.py --jobs 2 --install
+      - name: Install pinned CPU runtime build tools
+        if: runner.os == 'macOS'
+        run: >-
+          uv pip install --python .venv/bin/python --no-deps
+          cmake==3.31.6 ninja==1.11.1.3 wheel==0.45.1
+      - name: Build CPU ONNX Runtime for macOS 13.0
+        if: runner.os == 'macOS'
+        run: uv run --no-sync python tools/build_onnxruntime_macos.py --jobs 2 --install
       - run: uv run --no-sync ruff check .
       - run: uv run --no-sync ruff format --check .
       - run: uv run --no-sync pytest -q --junitxml=artifacts/tests.xml
@@ -65,4 +73,7 @@ jobs:
             artifacts/**/installation-test.json
             artifacts/**/windows-native.json
             artifacts/ci-mcp-smoke/result.json
+            build/onnxruntime-macos/native-manifest.json
+            build/onnxruntime-macos/build.log
+            build/onnxruntime-macos/source.log
             !artifacts/**/private-control/**

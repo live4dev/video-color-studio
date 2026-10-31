@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QApplication
 
 from .core.masks import MODEL_PATH, MODEL_SHA256
 from .core.project import sha256_file
+from .core.skin import SKIN_MODEL_ID, SKIN_MODEL_PATH, SKIN_MODEL_SHA256
 from .ui.main_window import MainWindow
 from .ui.theme import apply_theme
 
@@ -35,6 +36,9 @@ class VideoSmoke(QObject):
         self.screenshot_path = directory / "video_app_window.png"
         self.record_path = directory / "video_smoke.json"
         self.model_present = MODEL_PATH.is_file() and sha256_file(MODEL_PATH) == MODEL_SHA256
+        self.skin_model_present = (
+            SKIN_MODEL_PATH.is_file() and sha256_file(SKIN_MODEL_PATH) == SKIN_MODEL_SHA256
+        )
         self.mask_metadata = None
         self.video_info = None
         self.seek_requested = self.seek_actual = 0.0
@@ -103,9 +107,14 @@ class VideoSmoke(QObject):
                     raise RuntimeError("The actual GUI did not recognize the source video")
                 self.video_info = self.window.video_info.to_dict()
                 masks = self.window.preview.masks
-                if not self.model_present or masks is None:
+                if not self.model_present or not self.skin_model_present or masks is None:
                     raise RuntimeError("Bundled segmentation model or actual local masks missing")
                 self.mask_metadata = masks.to_metadata()
+                if (
+                    masks.skin_source != SKIN_MODEL_ID
+                    or masks.skin_model_sha256 != SKIN_MODEL_SHA256
+                ):
+                    raise RuntimeError("The packaged GUI did not execute the bundled skin model")
                 if not masks.method.startswith("pphumanseg"):
                     raise RuntimeError(
                         "The packaged GUI did not run the bundled segmentation model"
@@ -210,6 +219,8 @@ class VideoSmoke(QObject):
             "qt_platform": QApplication.platformName(),
             "model_present": self.model_present,
             "model_sha256": MODEL_SHA256,
+            "skin_model_present": self.skin_model_present,
+            "skin_model_sha256": SKIN_MODEL_SHA256,
             "masks": self.mask_metadata,
             "video_info": self.video_info,
             "seek_requested_seconds": self.seek_requested,

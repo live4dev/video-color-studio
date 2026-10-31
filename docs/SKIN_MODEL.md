@@ -75,3 +75,20 @@ ONNX Runtime 1.23.2 имеет wheel для Python 3.12/3.13 и Windows x64/macO
 поставки не проходит. Заголовки бинарников не переписываются. Наличие wheel,
 корректные заголовки или успешная упаковка не заменяют нативный smoke-test на каждой
 целевой системе.
+
+Подготовка CPU runtime перед локальной macOS-упаковкой:
+
+```sh
+uv pip install --python .venv/bin/python --no-deps \
+  cmake==3.31.6 ninja==1.11.1.3 wheel==0.45.1
+uv run --no-sync python tools/build_onnxruntime_macos.py --jobs 2 --install
+```
+
+Сборщик проверяет закреплённый commit 1.23.2, зависимости из upstream `deps.txt`,
+все Mach-O slices и настоящий CPU inference в отдельном процессе. Перед freeze
+`build_desktop.py` сверяет установленные native-библиотеки по SHA с этим отчётом;
+замена на stock wheel после проверки останавливает упаковку. В поставку попадают
+`native-onnxruntime/` с notices и отдельный `onnxruntime-native-manifest.json`,
+сохраняющий также прежний OpenCV manifest. CI выполняет исходную сборку runtime
+перед тестами и упаковкой. После установки собственной сборки используйте
+`uv run --no-sync`, чтобы обычный sync не вернул wheel из PyPI.

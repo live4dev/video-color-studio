@@ -83,9 +83,18 @@ def collect(destination: Path) -> None:
         )
     shutil.copyfile(runtime_license, destination / "PYTHON_LICENSE.txt")
     root = Path(__file__).resolve().parents[1]
+    collect_native_provenance(root, destination)
+    (destination / "manifest.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
+def collect_native_provenance(root: Path, destination: Path) -> None:
+    """Retain each native component's notices and distinct source-build record."""
     for directory, name in (
         (root / "build/media-sources/notices", "native-media"),
         (root / "build/opencv-image-only/notices", "native-opencv"),
+        (root / "build/onnxruntime-macos/notices", "native-onnxruntime"),
     ):
         if directory.is_dir():
             shutil.copytree(directory, destination / name)
@@ -96,9 +105,10 @@ def collect(destination: Path) -> None:
     ):
         if source.is_file():
             shutil.copyfile(source, destination / source.name)
-    (destination / "manifest.json").write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    onnx_manifest = root / "build/onnxruntime-macos/native-manifest.json"
+    if onnx_manifest.is_file():
+        # Preserve the OpenCV record's existing name as well as ORT provenance.
+        shutil.copyfile(onnx_manifest, destination / "onnxruntime-native-manifest.json")
 
 
 if __name__ == "__main__":
