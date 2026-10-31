@@ -4,6 +4,16 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      platform:
+        description: Target to test and package
+        type: choice
+        default: all
+        options:
+          - all
+          - windows
+          - macos-arm64
+          - macos-intel
 permissions:
   contents: read
 jobs:
@@ -11,13 +21,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: windows-2022
-            target: x86_64-pc-windows-msvc
-          - os: macos-15
-            target: aarch64-apple-darwin
-          - os: macos-15-intel
-            target: x86_64-apple-darwin
+        include: >-
+          ${{ fromJSON(
+            inputs.platform == 'windows' &&
+            '[{"os":"windows-2022","target":"x86_64-pc-windows-msvc"}]' ||
+            inputs.platform == 'macos-arm64' &&
+            '[{"os":"macos-15","target":"aarch64-apple-darwin"}]' ||
+            inputs.platform == 'macos-intel' &&
+            '[{"os":"macos-15-intel","target":"x86_64-apple-darwin"}]' ||
+            '[{"os":"windows-2022","target":"x86_64-pc-windows-msvc"},
+              {"os":"macos-15","target":"aarch64-apple-darwin"},
+              {"os":"macos-15-intel","target":"x86_64-apple-darwin"}]'
+          ) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 180
     env:

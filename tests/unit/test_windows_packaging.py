@@ -3,8 +3,9 @@
 import importlib
 import json
 import struct
+import subprocess
 import zipfile
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import pytest
 
@@ -184,6 +185,79 @@ def test_windows_opencv_failed_command_surfaces_compiler_error(win, tmp_path, mo
         opencv.build(work, tmp_path / "cache", None, 1, True)
     manifest = json.loads((work / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["status"] == "failed" and manifest["returncode"] == 23
+
+
+@pytest.fixture
+def cmake_tool():
+    host = importlib.import_module("tools.windows_native_host")
+    try:
+        return host.find_host_tool("cmake")
+    except RuntimeError:
+        pytest.skip("This regression executes the developer CMake parser; install cmake to run it")
+
+
+@pytest.mark.parametrize(
+    "original,expected",
+    [
+        (r"D:\a\build\zig-rc.exe", "D:/a/build/zig-rc.exe"),
+        (
+            PureWindowsPath(r"C:\Users\Test User\Дайвинг\zig-cxx.exe"),
+            "C:/Users/Test User/Дайвинг/zig-cxx.exe",
+        ),
+        (r"\\server\share\build folder\zig-rc.exe", "//server/share/build folder/zig-rc.exe"),
+        (Path("/project with spaces/Дайвинг/zig-rc"), "/project with spaces/Дайвинг/zig-rc"),
+    ],
+)
+def test_cmake_path_preserves_drive_unc_spaces_and_unicode(original, expected):
+    opencv = importlib.import_module("tools.build_windows_opencv")
+    assert opencv.cmake_path(original) == expected
+
+
+def test_raw_windows_rc_path_reproduces_the_actual_cmake_parse_failure(cmake_tool, tmp_path):
+    script = tmp_path / "broken-compiler.cmake"
+    script.write_text(
+        'cmake_minimum_required(VERSION 3.10)\nset(CMAKE_RC_COMPILER "'
+        + r"D:\a\video-color-studio\build\wrappers\zig-rc.exe"
+        + '")\n',
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [str(cmake_tool), "-P", str(script)], capture_output=True, encoding="utf-8"
+    )
+    assert result.returncode != 0
+    assert "Invalid character escape" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "original,expected",
+    [
+        (
+            r"D:\a\video-color-studio\build\wrappers\zig-rc.exe",
+            "D:/a/video-color-studio/build/wrappers/zig-rc.exe",
+        ),
+        (
+            PureWindowsPath(r"C:\Users\Test User\Дайвинг\zig-cxx.exe"),
+            "C:/Users/Test User/Дайвинг/zig-cxx.exe",
+        ),
+        (r"\\server\share\build folder\zig-rc.exe", "//server/share/build folder/zig-rc.exe"),
+    ],
+)
+def test_normalized_compiler_path_roundtrips_through_real_cmake(
+    cmake_tool, tmp_path, original, expected
+):
+    opencv = importlib.import_module("tools.build_windows_opencv")
+    observed = tmp_path / "parsed-path.txt"
+    script = tmp_path / "compiler.cmake"
+    script.write_text(
+        'cmake_minimum_required(VERSION 3.10)\nset(CMAKE_RC_COMPILER "'
+        + opencv.cmake_path(original)
+        + '")\nfile(WRITE "'
+        + observed.as_posix()
+        + '" "${CMAKE_RC_COMPILER}")\n',
+        encoding="utf-8",
+    )
+    subprocess.run([str(cmake_tool), "-P", str(script)], check=True, capture_output=True)
+    assert observed.read_text(encoding="utf-8") == expected
 
 
 def test_final_zip_requires_positive_matching_windows_source_scope(win, tmp_path):
