@@ -71,6 +71,9 @@ SYSTEM_DLLS = set(
         "d3d12",
         "d3d9",
         "d3dcompiler_47",
+        # Windows supplies DbgHelp; never redistribute a DLL copied from System32.
+        # https://learn.microsoft.com/windows/win32/debug/dbghelp-versions
+        "dbghelp",
         "dnsapi",
         "dwmapi",
         "dwrite",

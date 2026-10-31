@@ -18,7 +18,7 @@ def win(monkeypatch):
     return importlib.import_module("tools.build_windows_portable")
 
 
-def small_pe(*, imported="kernel32.dll", subsystem=2):
+def small_pe(*, imported="kernel32.dll", subsystem=2, function_name="GetModuleFileNameW"):
     data = bytearray(0x1000)
     data[:2] = b"MZ"
     struct.pack_into("<I", data, 0x3C, 0x80)
@@ -36,7 +36,7 @@ def small_pe(*, imported="kernel32.dll", subsystem=2):
     struct.pack_into("<5I", data, 0x300, 0x1200, 0, 0, 0x1300, 0x1200)
     struct.pack_into("<QQ", data, 0x400, 0x1400, 0)
     data[0x500 : 0x500 + len(imported) + 1] = imported.encode() + b"\0"
-    symbol = b"\0\0GetModuleFileNameW\0"
+    symbol = b"\0\0" + function_name.encode("ascii") + b"\0"
     data[0x600 : 0x600 + len(symbol)] = symbol
     return bytes(data)
 
@@ -123,6 +123,20 @@ def test_unknown_required_dll_and_unexpected_cv_plugin_import_fail_closed(win, t
     (tmp_path / "opencv_videoio_ffmpeg4140_64.dll").write_bytes(small_pe())
     with pytest.raises(ValueError, match="unused video plugin"):
         win.native_audit(tmp_path, trim_qt=True)
+
+
+def test_ort_dbghelp_import_is_a_reported_windows_os_dependency(win, tmp_path):
+    # The locked ORT wheel imports SymFromAddr/ImageDirectoryEntryToData from the
+    # Windows-provided DbgHelp 5.1+ API; no SDK/debugger DLL is bundled or downloaded.
+    path = tmp_path / "onnxruntime_pybind11_state.pyd"
+    path.write_bytes(small_pe(imported="dbghelp.dll", function_name="SymFromAddr"))
+    report = win.native_audit(tmp_path)
+    assert report["system_imports"] == ["dbghelp.dll"]
+    assert len(report["native_files"]) == 1
+    assert not (tmp_path / "dbghelp.dll").exists()
+    path.write_bytes(small_pe(imported="missing-vendor-runtime.dll"))
+    with pytest.raises(ValueError, match="Unbundled native dependency missing-vendor-runtime.dll"):
+        win.native_audit(tmp_path)
 
 
 def test_real_project_resolves_windows_profile_and_stable_abi_wheels(win):
