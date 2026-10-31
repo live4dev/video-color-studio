@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import subprocess
 import tarfile
 from pathlib import Path
 
@@ -48,6 +49,45 @@ def test_offline_collection_checks_cached_bytes_and_never_calls_network(tmp_path
     archive.unlink()
     with pytest.raises(FileNotFoundError, match="not cached"):
         collector.acquire(entry, tmp_path, offline=True)
+
+
+@pytest.mark.parametrize("failure", ["connection", "checksum"])
+def test_online_source_retries_are_bounded_and_only_verified_bytes_enter_cache(
+    tmp_path, monkeypatch, failure
+):
+    archive = tmp_path / "archives/example.tar.gz"
+    archive.parent.mkdir()
+    payload = b"verified upstream source bytes"
+    entry = {
+        "name": "example",
+        "filename": archive.name,
+        "sha256": hashlib.sha256(payload).hexdigest(),
+        "urls": ["https://primary.example/source", "https://mirror.example/source"],
+        "download_timeout": 120,
+    }
+    calls = []
+
+    def download(command, **kwargs):
+        calls.append(command)
+        assert not archive.exists()
+        partial = Path(command[command.index("--output") + 1])
+        partial.write_bytes(payload if len(calls) == 2 else b"incomplete source")
+        return subprocess.CompletedProcess(
+            command, 28 if len(calls) == 1 and failure == "connection" else 0, stderr=""
+        )
+
+    monkeypatch.setattr(collector.shutil, "which", lambda name: "curl")
+    monkeypatch.setattr(collector.subprocess, "run", download)
+    result = collector.acquire(entry, tmp_path)
+    assert archive.read_bytes() == payload
+    assert result["download"] == entry["urls"][1]
+    assert len(calls) == 2
+    for command in calls:
+        assert command[command.index("--connect-timeout") + 1] == "30"
+        assert command[command.index("--max-time") + 1] == "120"
+        assert command[command.index("--retry") + 1] == "2"
+        assert command[command.index("--retry-max-time") + 1] == "240"
+    assert not list(archive.parent.glob("*.partial"))
 
 
 def test_notice_reader_rejects_symlinks_and_never_extracts_member_paths(tmp_path):
