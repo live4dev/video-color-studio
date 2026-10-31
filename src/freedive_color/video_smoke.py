@@ -115,9 +115,9 @@ class VideoSmoke(QObject):
                     or masks.skin_model_sha256 != SKIN_MODEL_SHA256
                 ):
                     raise RuntimeError("The packaged GUI did not execute the bundled skin model")
-                if not masks.method.startswith("pphumanseg"):
+                if masks.method != "farneback-alpha-v2":
                     raise RuntimeError(
-                        "The packaged GUI did not run the bundled segmentation model"
+                        "The packaged GUI did not use the shared temporal mask pipeline"
                     )
                 self.seek_requested = min(0.19, self.window.video_info.duration / 4)
                 self._event("seek")

@@ -27,6 +27,7 @@ from freedive_color.core.video_pipeline import (
     export_video,
     probe_video,
     read_video_frame,
+    read_video_preview_frame,
 )
 from freedive_color.integrations.ffmpeg import open_local_media
 
@@ -232,6 +233,55 @@ def test_preview_masks_replay_source_history_and_match_full_export_at_same_pts(
         )
     assert preview_report["verification"]["audio_verified"]
     assert sha256_file(source) == source_digest
+
+
+def test_interactive_frame_masks_match_full_export_history_at_nonzero_vfr_pts(
+    videos, tmp_path, monkeypatch
+):
+    trackers = _recording_semantic_trackers(monkeypatch)
+    source = videos["vfr_offset"]
+    digest = sha256_file(source)
+    info, plan = probe_video(source), analyze_video(source)
+    export_video(
+        source,
+        tmp_path / "full-interactive.mp4",
+        get_preset("natural"),
+        local_settings=LocalSettings(),
+        plan=plan,
+    )
+    full = trackers[0]
+    preview = read_video_preview_frame(source, 0.2, 160, plan=plan)
+    selected = max(trackers[1].observations)
+    assert selected - float(info.video_start) == pytest.approx(preview.timestamp)
+    assert preview.plan is plan
+    assert preview.rgb.shape == (90, 160, 3)
+    assert preview.timestamp >= 0.2
+    assert len(trackers[1].observations) > 1  # Includes the shot prefix, not a fresh mask.
+    assert all(shape == (180, 320, 3) for shape, _skin in trackers[1].observations.values())
+    for timestamp, (_shape, skin) in trackers[1].observations.items():
+        np.testing.assert_array_equal(skin, full.observations[timestamp][1])
+    np.testing.assert_array_equal(
+        preview.masks.skin,
+        cv2.resize(full.observations[selected][1], (160, 90), interpolation=cv2.INTER_LINEAR),
+    )
+    assert sha256_file(source) == digest
+
+
+def test_interactive_frame_mask_history_is_cancellable(videos, monkeypatch):
+    trackers = _recording_semantic_trackers(monkeypatch)
+    source = videos["vfr_offset"]
+    plan, token = analyze_video(source), CancellationToken()
+
+    def cancel_before_history(_value, message):
+        if "видеомасок" in message:
+            token.cancel()
+
+    with pytest.raises(Cancelled):
+        read_video_preview_frame(
+            source, 0.2, plan=plan, token=token, progress=cancel_before_history
+        )
+    assert len(trackers) == 1
+    assert trackers[0].observations == {}
 
 
 def test_preview_mask_warmup_starts_at_current_shot_and_is_cancellable(

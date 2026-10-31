@@ -709,15 +709,31 @@ class MainWindow(ControllerWindowMixin, QMainWindow):
         def operation(token, progress):
             progress(10, _("Чтение медиафайла…"))
             info, actual = None, 0.0
+            masks, resolved_plan = None, video_plan
             if is_video:
-                from freedive_color.core.video_pipeline import probe_video, read_video_frame
+                from freedive_color.core.video_pipeline import (
+                    probe_video,
+                    read_video_preview_frame,
+                )
+
+                if resolved_plan is None and isinstance(cached_info.get("shot_plan"), dict):
+                    from freedive_color.core.temporal import ShotPlan
+
+                    resolved_plan = ShotPlan.from_dict(cached_info["shot_plan"])
 
                 info = probe_video(source)
-                rgb, actual = read_video_frame(
+                frame_preview = read_video_preview_frame(
                     source,
                     seek_position,
                     max_edge=max(info.width, info.height) if full_resolution else 1440,
+                    edits=edits,
+                    feather=local.feather,
+                    plan=resolved_plan,
+                    token=token,
+                    progress=progress,
                 )
+                rgb, actual = frame_preview.rgb, frame_preview.timestamp
+                masks, resolved_plan = frame_preview.masks, frame_preview.plan
                 photo = Photo(
                     source,
                     rgb,
@@ -753,15 +769,6 @@ class MainWindow(ControllerWindowMixin, QMainWindow):
                     resolved_reference = create_image_reference(reference_path)
                 except StudioError as exc:
                     photo.warnings.append(_("Эталон недоступен: ") + str(exc))
-            resolved_plan = video_plan
-            if (
-                is_video
-                and resolved_plan is None
-                and isinstance(cached_info.get("shot_plan"), dict)
-            ):
-                from freedive_color.core.temporal import ShotPlan
-
-                resolved_plan = ShotPlan.from_dict(cached_info["shot_plan"])
             if is_video and resolved_plan is not None:
                 analysis = resolved_plan.analysis_at(float(info.video_start) + actual)
             elif saved_analysis:
@@ -777,16 +784,28 @@ class MainWindow(ControllerWindowMixin, QMainWindow):
                 analysis,
                 local_settings=local,
                 mask_edits=edits,
+                masks=masks,
                 reference=resolved_reference,
                 check_cancelled=token.check,
             )
             return Preview(
-                photo, analysis, result, masks, warnings, digest, resolved_reference, info, actual
+                photo,
+                analysis,
+                result,
+                masks,
+                warnings,
+                digest,
+                resolved_reference,
+                info,
+                actual,
+                video_plan=resolved_plan if is_video else None,
+                video_masks=frame_preview.masks if is_video else None,
             )
 
         def success(preview):
             self.preview = preview
             self.video_info = preview.video_info
+            self._video_plan = preview.video_plan
             self.video_frame_seconds = preview.timestamp
             self._configure_video_ui()
             if self.reference is None and preview.reference is not None:
@@ -825,6 +844,7 @@ class MainWindow(ControllerWindowMixin, QMainWindow):
                     "sha256": preview.source_sha256,
                     "signature": list(photo.stat_signature),
                     **({"video": self.video_info.to_dict()} if self.video_info else {}),
+                    **({"shot_plan": preview.video_plan.to_dict()} if preview.video_plan else {}),
                 },
             )
             self.image_title.setText(source.name)
@@ -887,6 +907,13 @@ class MainWindow(ControllerWindowMixin, QMainWindow):
         edits = self.mask_edits
         reference = self.reference
         previous = self.preview
+        if self.video_info is not None and (
+            previous.video_masks is None
+            or edits != self.rendered_mask_edits
+            or local.feather != self.rendered_local_settings.feather
+        ):
+            self._load_selected(full_resolution=photo.rgb.shape[:2] == (photo.height, photo.width))
+            return
         self._status(_("Обновление цвета…"))
 
         def operation(token, _progress):
@@ -896,6 +923,7 @@ class MainWindow(ControllerWindowMixin, QMainWindow):
                 analysis,
                 local_settings=local,
                 mask_edits=edits,
+                masks=previous.video_masks if previous.video_info is not None else None,
                 reference=reference,
                 check_cancelled=token.check,
             )
@@ -912,6 +940,8 @@ class MainWindow(ControllerWindowMixin, QMainWindow):
                 previous.reference,
                 previous.video_info,
                 previous.timestamp,
+                video_plan=previous.video_plan,
+                video_masks=previous.video_masks,
             )
             self.rendered_settings = settings
             self.rendered_local_settings = local
