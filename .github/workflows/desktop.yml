@@ -14,10 +14,15 @@ on:
           - windows
           - macos-arm64
           - macos-intel
+      verify_run_id:
+        description: Verify the existing Windows archive from this run instead of rebuilding
+        type: string
+        default: ''
 permissions:
   contents: read
 jobs:
   desktop:
+    if: ${{ !inputs.verify_run_id }}
     strategy:
       fail-fast: false
       matrix:
@@ -133,3 +138,11 @@ jobs:
             build/onnxruntime-macos/build.log
             build/onnxruntime-macos/source.log
             !artifacts/**/private-control/**
+  windows-existing:
+    if: inputs.verify_run_id
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/windows-artifact-check.yml
+    with:
+      run_id: ${{ fromJSON(inputs.verify_run_id) }}

@@ -129,7 +129,9 @@ def main() -> None:
         ),
         encoding="utf-8",
     )
-    print(f"Standalone photo masks, video playback, audio and VFR export passed: {executable}")
+    print(
+        f"Standalone photo masks, video playback, audio and VFR export passed: {str(executable)!a}"
+    )
 
 
 if __name__ == "__main__":

@@ -1,0 +1,103 @@
+name: Verify an existing Windows portable archive
+on:
+  workflow_call:
+    inputs:
+      run_id:
+        type: number
+        required: true
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Desktop workflow run containing the immutable Windows artifact
+        type: number
+        required: true
+permissions:
+  contents: read
+  actions: read
+jobs:
+  verify:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONUTF8: '1'
+      FREEDIVE_INPUT_RUN_ID: ${{ inputs.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --frozen --python-platform x86_64-pc-windows-msvc --extra dev --extra build
+      - uses: actions/download-artifact@v4
+        with:
+          name: freedive-color-studio-windows-2022
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+          path: artifact-input
+      - name: Verify the immutable application and corresponding sources
+        shell: python
+        run: |
+          import hashlib, json, os
+          from pathlib import Path
+          archive = Path('artifact-input/dist/Freedive_Color_Studio_Windows_x64_UNTESTED.zip')
+          release = json.loads(archive.with_suffix('.json').read_text(encoding='utf-8'))
+          def digest(path):
+              checksum = hashlib.sha256()
+              with path.open('rb') as handle:
+                  for chunk in iter(lambda: handle.read(1024 * 1024), b''):
+                      checksum.update(chunk)
+              return checksum.hexdigest()
+          assert archive.stat().st_size == release['bytes']
+          assert digest(archive) == release['sha256']
+          sources = release['sources']
+          assert Path(sources['archive']).name == sources['archive']
+          source_archive = archive.parent / sources['archive']
+          assert source_archive.stat().st_size == sources['bytes']
+          assert digest(source_archive) == sources['sha256']
+          record = {'source_run_id': os.environ['FREEDIVE_INPUT_RUN_ID'],
+                    'application': release, 'source_archive_verified': True}
+          Path('artifacts').mkdir(exist_ok=True)
+          Path('artifacts/portable-artifact-input.json').write_text(
+              json.dumps(record, indent=2), encoding='utf-8')
+          print(json.dumps(record, ensure_ascii=True))
+      - name: Install and execute the actual immutable ZIP
+        run: >-
+          uv run --no-sync python tools/install_smoke.py
+          --archive artifact-input/dist/Freedive_Color_Studio_Windows_x64_UNTESTED.zip
+      - name: Bind native acceptance to the immutable archive checksum
+        shell: python
+        run: |
+          import json
+          from pathlib import Path
+          evidence = Path('artifacts')
+          original = json.loads((evidence / 'portable-artifact-input.json').read_text(encoding='utf-8'))
+          native_paths = list(evidence.rglob('windows-native.json'))
+          install_paths = list(evidence.rglob('installation-test.json'))
+          assert len(native_paths) == len(install_paths) == 1
+          native = json.loads(native_paths[0].read_text(encoding='utf-8'))
+          installed = json.loads(install_paths[0].read_text(encoding='utf-8'))
+          assert native['windows_execution'] == 'PASSED'
+          assert native['source_manifest_complete'] is True
+          assert installed['unicode_spaced_path'] is True
+          assert installed['photo_video_gui_smoke_passed'] is True
+          result = {'windows_execution': 'PASSED',
+                    'source_run_id': original['source_run_id'],
+                    'portable_sha256': original['application']['sha256'],
+                    'portable_bytes': original['application']['bytes'],
+                    'corresponding_source': original['application']['sources'],
+                    'payload_sha256': native['payload_sha256'],
+                    'native_report': str(native_paths[0]),
+                    'installation_report': str(install_paths[0])}
+          (evidence / 'windows-portable-acceptance.json').write_text(
+              json.dumps(result, indent=2), encoding='utf-8')
+          print(json.dumps(result, ensure_ascii=True))
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: verified-windows-portable-${{ inputs.run_id }}
+          path: |
+            artifacts/portable-artifact-input.json
+            artifacts/windows-portable-acceptance.json
+            artifacts/latest-bundle-smoke.json
+            artifacts/**/installation-test.json
+            artifacts/**/windows-native.json
