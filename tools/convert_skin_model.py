@@ -27,7 +27,7 @@ SOURCE_URL = (
     "selfie_multiclass_256x256/float32/1/selfie_multiclass_256x256.tflite"
 )
 SOURCE_SHA256 = "c6748b1253a99067ef71f7e26ca71096cd449baefa8f101900ea23016507e0e0"
-ONNX_SHA256 = "TO_BE_VERIFIED"
+ONNX_SHA256 = "cd2dff0e466a1ce493f2f9d8a9452e2dfbe500695ae4cf77f8d3a57c089c6856"
 MODEL_NAME = "selfie_multiclass_256x256.onnx"
 MODEL_DIRECTORY = ROOT / "src/freedive_color/assets/models"
 VERSIONS = {
@@ -371,7 +371,7 @@ def convert(source: Path, output: Path) -> dict:
         canonicalize_model(temporary)
         evidence = parity(source, temporary)
         digest = sha256(temporary)
-        if ONNX_SHA256 != "TO_BE_VERIFIED" and digest != ONNX_SHA256:
+        if digest != ONNX_SHA256:
             raise ValueError("Converted ONNX differs from the reproducible bundled model")
         if output.exists():
             if sha256(output) != digest:

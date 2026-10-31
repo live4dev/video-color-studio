@@ -14,6 +14,7 @@ from packaging.utils import canonicalize_name
 DISTRIBUTIONS = (
     "numpy",
     "opencv-python-headless",
+    "onnxruntime",
     "pillow",
     "PySide6-Essentials",
     "shiboken6",

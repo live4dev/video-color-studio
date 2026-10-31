@@ -130,6 +130,8 @@ def test_real_project_resolves_windows_profile_and_stable_abi_wheels(win):
     by_name = {entry["package"]: entry for entry in wheels}
     assert {"mcp", "mcp-types", "pywin32", "cryptography", "cffi"} <= by_name.keys()
     assert by_name["av"]["version"] == "16.1.0"
+    assert by_name["onnxruntime"]["version"] == "1.23.2"
+    assert "cp313-cp313-win_amd64" in by_name["onnxruntime"]["filename"]
     assert "cp313-cp313-win_amd64" in by_name["av"]["filename"]
     assert "cp39-abi3-win_amd64" in by_name["pyside6-essentials"]["filename"]
     assert by_name["tifffile"]["filename"].endswith("py3-none-any.whl")

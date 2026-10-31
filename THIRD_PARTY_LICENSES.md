@@ -9,6 +9,26 @@ SHA-256 `552d8a984054e59b5d773d24b9b12022b22046ceb2bbc4c9aaeaceb36a9ddf24`.
 пиксели; не генерирует изображение, не обращается в сеть и работает на CPU через
 OpenCV DNN. Уточнение GrabCut выполняется локально с фиксированными параметрами.
 
+## Семантическая модель видимой кожи
+
+Google MediaPipe SelfieMulticlass 256×256 float32, версия 1, классифицирует фон,
+волосы, кожу тела, кожу лица, одежду и аксессуары. Веса Google LLC распространяются
+по Apache-2.0, что отдельно подтверждено официальной карточкой модели:
+[Model Card Multiclass Segmentation](https://storage.googleapis.com/mediapipe-assets/Model%20Card%20Multiclass%20Segmentation.pdf).
+Официальный TFLite преобразован в ONNX без переобучения или изменения весов;
+источники, SHA-256, параметры ввода/вывода и рецепт находятся в
+`src/freedive_color/assets/models/SELFIE_MULTICLASS_METADATA.json` и
+`tools/convert_skin_model.py`. Apache notice включён рядом с моделью.
+Конвертация проверяется сравнением численных выходов TFLite и ONNX на синтетических
+данных и открытой тестовой фотографии. TensorFlow, tf2onnx и инструменты конвертации
+не входят в зависимости конечного приложения.
+
+ONNX Runtime 1.23.2 (Microsoft, MIT) выполняет локальный CPU inference. Полные
+notices ORT и включённых компонентов собираются из фактического wheel; телеметрия
+отключена до создания inference session. Модель не обучена специально на подводных
+снимках: оценки модели не являются процентом точности; сомнительная автомаска
+отключается, а ручная правка остаётся доступной.
+
 Исходный код Freedive Color Studio распространяется по MIT (LICENSE).
 Версии и хеши wheel-дистрибутивов фиксирует `uv.lock`; установка только из PyPI
 и Python runtime из python-build-standalone через uv. Код моделей не загружается.
@@ -20,6 +40,7 @@ OpenCV DNN. Уточнение GrabCut выполняется локально �
 | Qt / PySide6 Essentials / Shiboken6 | Desktop UI, Widgets | LGPL-3.0 / GPL / commercial; https://doc.qt.io/qtforpython-6/licenses.html |
 | NumPy | Float32 вычисления | BSD-3-Clause; https://numpy.org/doc/stable/license.html |
 | OpenCV headless | Фильтры, 16-bit PNG | Apache-2.0 (OpenCV 4.5+); https://opencv.org/license/ |
+| ONNX Runtime 1.23.2 | CPU-сегментация видимой кожи | MIT; https://github.com/microsoft/onnxruntime |
 | Pillow / LittleCMS | EXIF, ICC, декодирование | MIT-CMU / MIT; https://pillow.readthedocs.io/en/stable/about.html#license |
 | tifffile | 16-bit TIFF | BSD-3-Clause; https://github.com/cgohlke/tifffile |
 | PyAV 15.1.0 macOS / 16.1.0 Windows | PTS-aware decode/encode/remux | BSD; https://github.com/PyAV-Org/PyAV |

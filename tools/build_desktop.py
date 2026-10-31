@@ -11,6 +11,7 @@ from pathlib import Path
 
 from audit_macos import audit
 from collect_licenses import collect
+from verify_models import verify_models
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -18,6 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def build() -> None:
     if sys.platform not in ("darwin", "win32"):
         raise SystemExit("Run this script on macOS or Windows.")
+    verify_models()
     if sys.platform == "win32":
         stage = ROOT / "build/windows-portable/Freedive Color Studio"
         commands = [
